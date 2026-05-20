@@ -1,0 +1,26 @@
+# === Python / 환경변수 ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.env
+
+# === macOS ===
+.DS_Store
+
+# === ARCUS (Yadut) 특화 ===
+project_mac/screenshots/*
+!project_mac/screenshots/.gitkeep
+
+# === Swift / Xcode (추후 iOS 이주용) ===
+build/
+DerivedData/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspace
+**/xcuserdata/
+*.xcuserstate
