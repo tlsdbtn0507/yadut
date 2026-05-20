@@ -18,8 +18,8 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 MACBOOK_URL = os.getenv("MAC_EYE_URL", "http://100.84.129.54:8000")  # 맥북 FastAPI 서버 주소
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SOUL_FILE = os.path.join(BASE_DIR, "hermes_core", "soul.md")
-MEMORY_FILE = os.path.join(BASE_DIR, "hermes_core", "memory.md")
+SOUL_FILE = os.path.join(os.path.dirname(BASE_DIR), "hermes_core", "soul.md")
+MEMORY_FILE = os.path.join(os.path.dirname(BASE_DIR), "hermes_core", "memory.md")
 
 # 로깅 설정
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -214,7 +214,7 @@ bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 @asynccontextmanager
 async def lifespan(api_app: FastAPI):
     # 폴더가 없으면 생성
-    os.makedirs(os.path.join(BASE_DIR, "hermes_core"), exist_ok=True)
+    os.makedirs(os.path.join(os.path.dirname(BASE_DIR), "hermes_core"), exist_ok=True)
     if not os.path.exists(SOUL_FILE):
         with open(SOUL_FILE, "w") as f: f.write("I am ARCUS.")
     
