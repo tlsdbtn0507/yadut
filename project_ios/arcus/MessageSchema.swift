@@ -7,6 +7,27 @@ struct ArcusRequest: Encodable {
     let timestamp: String
     let text: String?
     let audioData: String?
+    let attachmentData: String?
+    let attachmentName: String?
+    let attachmentType: String?
+    
+    init(
+        messageId: String,
+        timestamp: String,
+        text: String? = nil,
+        audioData: String? = nil,
+        attachmentData: String? = nil,
+        attachmentName: String? = nil,
+        attachmentType: String? = nil
+    ) {
+        self.messageId = messageId
+        self.timestamp = timestamp
+        self.text = text
+        self.audioData = audioData
+        self.attachmentData = attachmentData
+        self.attachmentName = attachmentName
+        self.attachmentType = attachmentType
+    }
     
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -14,6 +35,9 @@ struct ArcusRequest: Encodable {
         case timestamp
         case text
         case audioData = "audio_data"
+        case attachmentData = "attachment_data"
+        case attachmentName = "attachment_name"
+        case attachmentType = "attachment_type"
     }
 }
 

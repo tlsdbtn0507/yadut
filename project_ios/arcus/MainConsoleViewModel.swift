@@ -52,6 +52,7 @@ class MainConsoleViewModel: ObservableObject {
     @Published var audioLevel: CGFloat = 0.0
     @Published var isArcusThinking = false
     @Published var processStage: ArcusProcessStage = .transmitting
+    @Published var selectedAttachment: SelectedAttachment? = nil
     
     private let webSocketManager: WebSocketManagerProtocol
     private var cancellables = Set<AnyCancellable>()
@@ -167,17 +168,18 @@ class MainConsoleViewModel: ObservableObject {
     }
     
     func sendMessage() {
-        guard !inputText.isEmpty else { return }
+        guard !inputText.isEmpty || selectedAttachment != nil else { return }
         
-        let userMsg = ChatMessage(text: inputText, isUser: true)
+        let userMsg = ChatMessage(text: inputText, isUser: true, attachment: selectedAttachment)
         messages.append(userMsg)
         
-        // 서버에 텍스트 메시지 전송
-        webSocketManager.send(text: inputText)
+        // 서버에 텍스트 및 첨부 파일 전송
+        webSocketManager.send(text: inputText, attachment: selectedAttachment)
         
         startThinkingSimulation()
         updateHUD(with: connectionStatus)
         inputText = ""
+        selectedAttachment = nil
     }
 }
 
@@ -185,4 +187,11 @@ struct ChatMessage: Identifiable {
     let id = UUID()
     let text: String
     let isUser: Bool
+    let attachment: SelectedAttachment?
+    
+    init(text: String, isUser: Bool, attachment: SelectedAttachment? = nil) {
+        self.text = text
+        self.isUser = isUser
+        self.attachment = attachment
+    }
 }

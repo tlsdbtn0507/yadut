@@ -19,6 +19,16 @@ enum WebSocketStatus: Equatable {
         }
     }
 }
+enum AttachmentType: String, Codable, Equatable {
+    case image
+    case file
+}
+
+struct SelectedAttachment: Equatable {
+    let type: AttachmentType
+    let data: Data
+    let name: String
+}
 
 /// WebSocketManager 인터페이스
 protocol WebSocketManagerProtocol {
@@ -28,7 +38,13 @@ protocol WebSocketManagerProtocol {
     func connect(url: URL)
     func disconnect()
     func send(audioData: Data)
-    func send(text: String)
+    func send(text: String, attachment: SelectedAttachment?)
+}
+
+extension WebSocketManagerProtocol {
+    func send(text: String) {
+        send(text: text, attachment: nil)
+    }
 }
 
 /// WebSocketManager 실제 구현체
@@ -73,14 +89,17 @@ class WebSocketManager: NSObject, WebSocketManagerProtocol {
         statusSubject.send(.disconnected)
     }
     
-    func send(text: String) {
+    func send(text: String, attachment: SelectedAttachment?) {
         guard statusSubject.value == .connected else { return }
         
         let request = ArcusRequest(
             messageId: UUID().uuidString,
             timestamp: ISO8601DateFormatter().string(from: Date()),
-            text: text,
-            audioData: nil
+            text: text.isEmpty ? nil : text,
+            audioData: nil,
+            attachmentData: attachment?.data.base64EncodedString(),
+            attachmentName: attachment?.name,
+            attachmentType: attachment?.type.rawValue
         )
         sendRequest(request)
     }

@@ -1,7 +1,17 @@
-import SwiftUI
+ import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 struct MainConsoleView: View {
     @StateObject private var viewModel = MainConsoleViewModel()
+    
+    // State variables for attachment sheets/pickers
+    @State private var showAttachmentSourceSheet = false
+    @State private var showPhotosPicker = false
+    @State private var showFilePicker = false
+    
+    // For PhotosPicker (requires PhotosUI)
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
     
     // Simulating audio levels for the high-fidelity sound visualizer
     @State private var mockAudioLevels: [CGFloat] = Array(repeating: 0.1, count: 12)
@@ -111,6 +121,70 @@ struct MainConsoleView: View {
         }
         .onDisappear {
             timer?.invalidate()
+        }
+        .confirmationDialog("첨부 파일 선택", isPresented: $showAttachmentSourceSheet, titleVisibility: .visible) {
+            Button("사진 첨부 (라이브러리)") {
+                showPhotosPicker = true
+            }
+            Button("파일 첨부 (파일 앱)") {
+                showFilePicker = true
+            }
+            Button("취소", role: .cancel) {}
+        }
+        .photosPicker(
+            isPresented: $showPhotosPicker,
+            selection: $selectedPhotoItem,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.data, .content, .item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                if url.startAccessingSecurityScopedResource() {
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    do {
+                        let data = try Data(contentsOf: url)
+                        let fileName = url.lastPathComponent
+                        let isImage = ["png", "jpg", "jpeg", "gif", "heic"].contains(url.pathExtension.lowercased())
+                        let type: AttachmentType = isImage ? .image : .file
+                        viewModel.selectedAttachment = SelectedAttachment(
+                            type: type,
+                            data: data,
+                            name: fileName
+                        )
+                    } catch {
+                        print("Failed to read file contents: \(error)")
+                    }
+                }
+            case .failure(let error):
+                print("File selection failed: \(error)")
+            }
+        }
+        .onChange(of: selectedPhotoItem) { oldValue, newValue in
+            guard let item = newValue else { return }
+            item.loadTransferable(type: Data.self) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let data):
+                        if let data = data {
+                            let fileName = "IMG_\(Int(Date().timeIntervalSince1970)).jpg"
+                            viewModel.selectedAttachment = SelectedAttachment(
+                                type: .image,
+                                data: data,
+                                name: fileName
+                            )
+                        }
+                    case .failure(let error):
+                        print("Failed to load photo data: \(error)")
+                    }
+                    selectedPhotoItem = nil
+                }
+            }
         }
     }
     
@@ -333,7 +407,7 @@ struct MainConsoleView: View {
                         emptyStateView
                     } else {
                         ForEach(viewModel.messages) { message in
-                            chatBubble(text: message.text, isUser: message.isUser)
+                            chatBubble(message: message)
                                 .id(message.id)
                         }
                         
@@ -502,8 +576,11 @@ struct MainConsoleView: View {
     }
     
     // MARK: - 5. High-Fidelity Glassmorphic Chat Bubble
-    private func chatBubble(text: String, isUser: Bool) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+    private func chatBubble(message: ChatMessage) -> some View {
+        let isUser = message.isUser
+        let text = message.text
+        
+        return HStack(alignment: .top, spacing: 10) {
             if isUser { Spacer() }
             
             if !isUser {
@@ -531,48 +608,56 @@ struct MainConsoleView: View {
                     .padding(.horizontal, 4)
                 
                 // Bubble Main Frame
-                Text(text)
-                    .font(.system(size: 14.5, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        ChatBubbleShape(isUser: isUser)
-                            .fill(
-                                isUser ?
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.045), Color.white.opacity(0.015)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ) :
-                                LinearGradient(
-                                    colors: [Color.blue.opacity(0.09), Color(red: 0.05, green: 0.08, blue: 0.18).opacity(0.55)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+                VStack(alignment: isUser ? .trailing : .leading, spacing: 8) {
+                    if let attachment = message.attachment {
+                        bubbleAttachmentView(attachment, isUser: isUser)
+                    }
+                    
+                    if !text.isEmpty {
+                        Text(text)
+                            .font(.system(size: 14.5, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    ChatBubbleShape(isUser: isUser)
+                        .fill(
+                            isUser ?
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.045), Color.white.opacity(0.015)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ) :
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.09), Color(red: 0.05, green: 0.08, blue: 0.18).opacity(0.55)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                    )
-                    .overlay(
-                        ChatBubbleShape(isUser: isUser)
-                            .strokeBorder(
-                                isUser ?
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ) :
-                                LinearGradient(
-                                    colors: [Color.cyan.opacity(0.35), Color.blue.opacity(0.08)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 0.8
-                            )
-                    )
-                    .shadow(
-                        color: isUser ? Color.clear : Color.blue.opacity(0.08),
-                        radius: 8, x: 0, y: 4
-                    )
+                        )
+                )
+                .overlay(
+                    ChatBubbleShape(isUser: isUser)
+                        .strokeBorder(
+                            isUser ?
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ) :
+                            LinearGradient(
+                                colors: [Color.cyan.opacity(0.35), Color.blue.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.8
+                        )
+                )
+                .shadow(
+                    color: isUser ? Color.clear : Color.blue.opacity(0.08),
+                    radius: 8, x: 0, y: 4
+                )
             }
             
             if isUser {
@@ -595,10 +680,132 @@ struct MainConsoleView: View {
         }
     }
     
+    // Bubble media renderer
+    private func bubbleAttachmentView(_ attachment: SelectedAttachment, isUser: Bool) -> some View {
+        Group {
+            if attachment.type == .image, let uiImage = UIImage(data: attachment.data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 200)
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isUser ? Color.white.opacity(0.18) : Color.cyan.opacity(0.35), lineWidth: 0.8)
+                    )
+                    .shadow(color: isUser ? Color.clear : Color.cyan.opacity(0.12), radius: 6)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: attachment.type == .image ? "photo.fill" : "doc.text.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(isUser ? .white.opacity(0.8) : Color.cyan)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(attachment.name)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        
+                        Text(attachment.type == .image ? "IMAGE PACKET" : "DATA STREAM")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(isUser ? .white.opacity(0.5) : Color.cyan.opacity(0.8))
+                    }
+                }
+                .padding(8)
+                .background(Color.white.opacity(0.04))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+            }
+        }
+        .padding(.bottom, 2)
+    }
+    
+    // Horizontal Attachment Preview Bar above Textfield
+    private func attachmentPreviewBar(_ attachment: SelectedAttachment) -> some View {
+        HStack(spacing: 12) {
+            if attachment.type == .image, let uiImage = UIImage(data: attachment.data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 38, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.cyan.opacity(0.4), lineWidth: 0.8)
+                    )
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 38, height: 38)
+                    
+                    Image(systemName: attachment.type == .image ? "photo.fill" : "doc.text.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color.cyan)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.name)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Text(attachment.type == .image ? "IMAGE STREAM" : "DATA PACKET")
+                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                    .foregroundColor(Color.cyan.opacity(0.8))
+            }
+            
+            Spacer()
+            
+            Button(action: {
+                withAnimation(.spring()) {
+                    viewModel.selectedAttachment = nil
+                }
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.blue.opacity(0.12), Color.black.opacity(0.4)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.cyan.opacity(0.25), lineWidth: 0.75)
+        )
+        .shadow(color: Color.cyan.opacity(0.08), radius: 6)
+    }
+    
     // MARK: - 6. Premium Glassmorphic Bottom Control Area
     private var controlArea: some View {
         VStack(spacing: 0) {
             if !viewModel.isListening {
+                // Floating attachment preview bar
+                if let attachment = viewModel.selectedAttachment {
+                    attachmentPreviewBar(attachment)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .bottom)),
+                            removal: .opacity.combined(with: .scale(scale: 0.9))
+                        ))
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                }
+                
                 HStack(spacing: 12) {
                     // Futuristic Glowing Mic Button
                     Button(action: { viewModel.startListening() }) {
@@ -633,15 +840,26 @@ struct MainConsoleView: View {
                             .padding(.horizontal, 16)
                             .accentColor(Color.cyan)
                         
+                        // Futuristic Attachment Paperclip Button
+                        Button(action: { showAttachmentSourceSheet = true }) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundColor(viewModel.selectedAttachment != nil ? Color.cyan : .white.opacity(0.4))
+                                .padding(.horizontal, 6)
+                                .shadow(color: viewModel.selectedAttachment != nil ? Color.cyan.opacity(0.3) : .clear, radius: 4)
+                                .scaleEffect(viewModel.selectedAttachment != nil ? 1.15 : 1.0)
+                                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: viewModel.selectedAttachment)
+                        }
+                        
                         Button(action: { viewModel.sendMessage() }) {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 30))
-                                .foregroundColor(viewModel.inputText.isEmpty ? Color.white.opacity(0.15) : Color.cyan)
-                                .shadow(color: viewModel.inputText.isEmpty ? .clear : Color.cyan.opacity(0.5), radius: 8)
+                                .foregroundColor((viewModel.inputText.isEmpty && viewModel.selectedAttachment == nil) ? Color.white.opacity(0.15) : Color.cyan)
+                                .shadow(color: (viewModel.inputText.isEmpty && viewModel.selectedAttachment == nil) ? .clear : Color.cyan.opacity(0.5), radius: 8)
                                 .padding(.trailing, 6)
                                 .animation(.easeOut(duration: 0.18), value: viewModel.inputText.isEmpty)
                         }
-                        .disabled(viewModel.inputText.isEmpty)
+                        .disabled(viewModel.inputText.isEmpty && viewModel.selectedAttachment == nil)
                     }
                     .frame(height: 46)
                     .background(
