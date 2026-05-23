@@ -153,3 +153,62 @@ async def test_websocket_image_sync_success(mock_get, mock_post):
     
     # Verify that the success message was sent back via WebSocket
     websocket.send_text.assert_called_once_with("Calendar updated")
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_websocket_image_chat_success(mock_post, mock_classify):
+    # Mock WebSocket object
+    websocket = AsyncMock()
+    
+    # Mock intent classification to return IMAGE_CHAT
+    mock_classify.return_value = "IMAGE_CHAT"
+    
+    # Mock message payload (containing image base64 data and general prompt)
+    import base64
+    fake_image_base64 = base64.b64encode(b"fake_image_data").decode("utf-8")
+    payload = {
+        "text": "이 사진은 무슨 사진이야?",
+        "attachment_type": "image",
+        "attachment_data": fake_image_base64,
+        "attachment_name": "IMG_123.jpg",
+        "message_id": "test_msg_id"
+    }
+    
+    from fastapi import WebSocketDisconnect
+    websocket.receive_text = AsyncMock(side_effect=[json.dumps(payload), WebSocketDisconnect()])
+    
+    # Mock responses for upload and chat_with_image
+    mock_upload_res = MagicMock()
+    mock_upload_res.status_code = 200
+    mock_upload_res.json.return_value = {
+        "status": "success", 
+        "filename": "remote_schedule_test_msg_id.png"
+    }
+    
+    mock_chat_res = MagicMock()
+    mock_chat_res.status_code = 200
+    mock_chat_res.json.return_value = {
+        "status": "success",
+        "message": "마스터, 이것은 아름다운 고양이 사진입니다."
+    }
+    
+    # Mock post calls (upload first, then chat_with_image)
+    mock_post.side_effect = [mock_upload_res, mock_chat_res]
+    
+    # Run endpoint
+    await websocket_endpoint(websocket)
+    
+    # Verify both post calls (1. upload, 2. chat_with_image)
+    assert mock_post.call_count == 2
+    
+    # Verify the first call is upload
+    first_call_args = mock_post.call_args_list[0][0][0]
+    assert "upload" in first_call_args
+    
+    # Verify the second call is chat_with_image
+    second_call_args = mock_post.call_args_list[1][0][0]
+    assert "chat_with_image" in second_call_args
+    
+    # Verify chat was sent back to WebSocket
+    websocket.send_text.assert_called_once_with("마스터, 이것은 아름다운 고양이 사진입니다.")

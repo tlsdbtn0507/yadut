@@ -38,18 +38,19 @@ def add_event_to_calendar(summary, start_time, end_time=None):
         
         tell application "Calendar"
             tell calendar "직장"
-                # 해당 날짜에 이미 시작하는 일정이 있는지 확인
+                # 해당 날짜의 기존 일정을 검색하여 일관성 있게 삭제합니다.
                 set existingEvents to (every event whose start date is greater than or equal to dayStart and start date is less than or equal to dayEnd)
                 
-                if (count of existingEvents) > 0 then
-                    # 기존 일정이 있으면 첫 번째 일정을 업데이트
-                    set theEvent to item 1 of existingEvents
-                    set summary of theEvent to newSummary
-                    set start date of theEvent to newStart
-                    set end date of theEvent to newEnd
-                    return "UPDATED"
+                repeat with theEvent in existingEvents
+                    delete theEvent
+                end repeat
+                
+                if newSummary is "휴무" then
+                    # 휴무일인 경우 하루종일 일정 등록
+                    make new event with properties {{summary:"휴무", start date:dayStart, end date:dayStart, allday event:true}}
+                    return "HOLIDAY_CREATED"
                 else
-                    # 없으면 신규 생성
+                    # 근무일인 경우 일반 일정 등록
                     make new event with properties {{summary:newSummary, start date:newStart, end date:newEnd}}
                     return "CREATED"
                 end if
@@ -63,8 +64,8 @@ def add_event_to_calendar(summary, start_time, end_time=None):
     result = subprocess.run(script, shell=True, capture_output=True, text=True)
     output = result.stdout.strip()
     
-    if "UPDATED" in output:
-        print(f"🔄 업데이트: '{summary}' ({start_time}) 기존 일정을 수정했습니다.")
+    if "HOLIDAY_CREATED" in output:
+        print(f"🗑️ 휴무 등록: '{summary}' ({start_time}) 기존 일정을 삭제하고 하루종일 휴무 일정을 생성했습니다.")
         return True
     elif "CREATED" in output:
         print(f"✅ 신규 등록: '{summary}' ({start_time}) 일정을 추가했습니다.")
@@ -88,17 +89,18 @@ def extract_schedule_from_image_gemma(image_path):
     current_year = datetime.now().year
     
     prompt = f"""
-    이 이미지(근무 스케줄표)를 분석해서 월요일부터 일요일까지의 모든 근무 일정을 추출해줘.
+    이 이미지(근무 스케줄표)를 분석해서 월요일부터 일요일까지의 주간 일정을 추출해줘.
     
     지침:
     1. 현재 연도는 {current_year}년이야. 이미지에 연도가 없으면 반드시 {current_year}년을 사용해.
     2. 시간은 반드시 '오전/오후 HH:MM:SS' 형식을 지켜줘. (예: 오후 3:00:00)
-    3. 주간 단위의 모든 날짜 일정을 리스트 형식의 JSON으로만 응답해줘. 다른 설명은 하지마.
-    4. 근무가 없는 날은 제외해.
-    5. **중요: summary 필드에는 근무 시간에 따라 '오픈', '미들', '마감' 중 하나를 넣어줘.**
+    3. 주간 단위의 모든 날짜(월요일~일요일)의 일정을 리스트 형식의 JSON으로만 응답해줘. 다른 설명은 하지마.
+    4. 근무가 없는 날(휴무)도 생략하지 말고 반드시 포함해야 해. 휴무일의 경우 summary 필드에 '휴무'라고 입력하고, start_time과 end_time은 해당 날짜의 오전 09:00:00로 설정해줘.
+    5. **중요: summary 필드에는 근무 시간에 따라 '오픈', '미들', '마감', 또는 '휴무' 중 하나를 넣어줘.**
        - 오픈: 주로 이른 아침에 시작하는 근무 (예: 07:00 ~ 15:00)
        - 마감: 밤 늦게 종료되는 근무 (예: 15:00 ~ 23:00)
        - 미들: 그 사이 시간대 근무 (예: 11:00 ~ 19:00)
+       - 휴무: 근무가 없는 날
     
     응답 형식 (JSON 리스트):
     [
@@ -165,17 +167,18 @@ def extract_schedule_from_image_gemini(image_path):
     model = genai.GenerativeModel(model_name)
     
     prompt = f"""
-    이 이미지(근무 스케줄표)를 분석해서 월요일부터 일요일까지의 모든 근무 일정을 추출해줘.
+    이 이미지(근무 스케줄표)를 분석해서 월요일부터 일요일까지의 주간 일정을 추출해줘.
     
     지침:
     1. 현재 연도는 {current_year}년이야. 이미지에 연도가 없으면 반드시 {current_year}년을 사용해.
     2. 시간은 반드시 '오전/오후 HH:MM:SS' 형식을 지켜줘. (예: 오후 3:00:00)
-    3. 이미지가 주간 단위라면 모든 날짜의 일정을 리스트 형식의 JSON으로 응답해줘.
-    4. 근무가 없는 날은 제외해.
-    5. **중요: summary 필드에는 근무 시간에 따라 '오픈', '미들', '마감' 중 하나를 넣어줘.**
+    3. 주간 단위의 모든 날짜(월요일~일요일)의 일정을 리스트 형식의 JSON으로 응답해줘.
+    4. 근무가 없는 날(휴무)도 생략하지 말고 반드시 포함해야 해. 휴무일의 경우 summary 필드에 '휴무'라고 입력하고, start_time과 end_time은 해당 날짜의 오전 09:00:00로 설정해줘.
+    5. **중요: summary 필드에는 근무 시간에 따라 '오픈', '미들', '마감', 또는 '휴무' 중 하나를 넣어줘.**
        - 오픈: 주로 이른 아침에 시작하는 근무
        - 마감: 밤 늦게 종료되는 근무
        - 미들: 그 사이 시간대 근무
+       - 휴무: 근무가 없는 날
     
     응답 형식 (JSON):
     [
@@ -230,6 +233,51 @@ def sync_image_to_calendar(image_path, use_local=False):
         print("❌ 추출된 일정 리스트가 없습니다.")
     return False
 
+def chat_about_image(prompt: str, image_path: str) -> str:
+    """
+    Gemini 비전 모델을 사용하여 이미지에 대한 아르커스 정체성 기반의 대화 답변을 생성합니다.
+    """
+    model_name = 'gemini-3.1-flash-image-preview'
+    if not GEMINI_API_KEY:
+        return "죄송합니다, 마스터. 현재 API 키가 설정되지 않아 이미지를 분석하고 대화할 수 없습니다."
+        
+    try:
+        if not os.path.exists(image_path):
+            return "죄송합니다, 마스터. 분석할 이미지 파일을 찾을 수 없습니다."
+            
+        with open(image_path, "rb") as f:
+            image_data = f.read()
+            
+        # soul.md 파일에서 아르커스의 정체성(자아)을 읽어와 프롬프트로 주입
+        soul_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../hermes_core/soul.md"))
+        soul_context = ""
+        if os.path.exists(soul_path):
+            with open(soul_path, "r", encoding="utf-8") as sf:
+                soul_context = sf.read()
+                
+        # 아르커스 정체성 강조 지침 추가
+        system_instruction = (
+            f"{soul_context}\n\n"
+            "지침:\n"
+            "당신은 마스터의 친절하고 유능한 인공지능 비서 아르커스(ARCUS)로서 마스터가 보낸 사진을 정밀하게 확인하고 답변을 주어야 합니다.\n"
+            "모든 응답은 마스터에 대한 존경심을 담아 '존댓말'을 엄수하고, '마스터' 또는 '주인님'이라는 호칭을 사용해야 합니다.\n"
+        )
+        
+        # 텍스트가 비어 있는 경우 디폴트 질문 템플릿 사용
+        if not prompt or prompt.strip() == "":
+            prompt = "마스터가 텍스트 질문 없이 이미지만 보내주셨습니다. 이 사진이 무엇인지 정중하게 마스터께 묘사해 드리고 친근하게 말을 걸어보십시오."
+            
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content([
+            system_instruction + "\n\n마스터의 질문: " + prompt,
+            {"mime_type": "image/png", "data": image_data}
+        ])
+        
+        return response.text
+        
+    except Exception as e:
+        return f"죄송합니다, 마스터. 사진 분석 중 시스템 내부 오류가 발생했습니다: {str(e)}"
+
 if __name__ == "__main__":
     # 두 개의 테스트 이미지를 '직장' 캘린더로 재동기화 (업데이트 로직 테스트)
     test_images = ["screenshots/schedule_test.png", "screenshots/schedule_quiz.PNG"]
@@ -240,3 +288,4 @@ if __name__ == "__main__":
             sync_image_to_calendar(img, use_local=False)
         else:
             print(f"파일이 없습니다: {img}")
+

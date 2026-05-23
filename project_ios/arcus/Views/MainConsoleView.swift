@@ -889,7 +889,7 @@ struct MainConsoleView: View {
                         .padding(.bottom, 10)
                 }
                 
-                HStack(spacing: 12) {
+                HStack(alignment: .bottom, spacing: 12) {
                     // Futuristic Glowing Mic Button
                     Button(action: { viewModel.startListening() }) {
                         ZStack {
@@ -916,11 +916,14 @@ struct MainConsoleView: View {
                     .buttonStyle(MicButtonStyle())
                     
                     // Glassmorphic Smart Input Textfield Bar
-                    HStack {
-                        TextField("Transmit direct data stream...", text: $viewModel.inputText)
+                    HStack(alignment: .bottom, spacing: 0) {
+                        TextField("Transmit direct data stream...", text: $viewModel.inputText, axis: .vertical)
+                            .lineLimit(1...5)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white)
-                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .padding(.leading, 16)
+                            .padding(.trailing, 8)
                             .accentColor(Color.cyan)
                         
                         // Futuristic Attachment Paperclip Button
@@ -938,6 +941,7 @@ struct MainConsoleView: View {
                                 .rotationEffect(.degrees(showAttachmentMenu ? 90 : 0))
                                 .animation(.spring(response: 0.25, dampingFraction: 0.6), value: showAttachmentMenu)
                         }
+                        .padding(.bottom, 10)
                         
                         Button(action: { viewModel.sendMessage() }) {
                             Image(systemName: "arrow.up.circle.fill")
@@ -948,8 +952,9 @@ struct MainConsoleView: View {
                                 .animation(.easeOut(duration: 0.18), value: viewModel.inputText.isEmpty)
                         }
                         .disabled(viewModel.inputText.isEmpty && viewModel.selectedAttachment == nil)
+                        .padding(.bottom, 8)
                     }
-                    .frame(height: 46)
+                    .frame(minHeight: 46)
                     .background(
                         RoundedRectangle(cornerRadius: 23)
                             .fill(

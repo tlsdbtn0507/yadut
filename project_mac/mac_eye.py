@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime
 import uvicorn
 from fastapi.responses import FileResponse
-from calendar_sync import sync_image_to_calendar
+from calendar_sync import sync_image_to_calendar, chat_about_image
 
 app = FastAPI()
 
@@ -74,6 +74,26 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.post("/chat_with_image")
+async def chat_with_image(prompt: str, file: UploadFile = File(...)):
+    try:
+        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"remote_{now}_{file.filename}"
+        filepath = os.path.join(SCREENSHOT_DIR, filename)
+        
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        chat_response = chat_about_image(prompt, filepath)
+        
+        return {
+            "status": "success",
+            "message": chat_response
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/sync_calendar/{filename}")
 async def sync_calendar(filename: str):
     try:
@@ -83,9 +103,9 @@ async def sync_calendar(filename: str):
         
         success = sync_image_to_calendar(filepath, use_local=False)
         if success:
-            return {"status": "success", "message": "캘린더 동기화가 성공적으로 완료되었습니다!"}
+            return {"status": "success", "message": "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!"}
         else:
-            return {"status": "error", "message": "스케줄 추출 및 캘린더 등록에 실패했습니다."}
+            return {"status": "error", "message": "죄송합니다, 마스터. 일정 분석 및 캘린더 등록에 실패했습니다. 이미지 상태를 다시 확인해 주시겠습니까?"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

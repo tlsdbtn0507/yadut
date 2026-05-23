@@ -70,6 +70,58 @@ async def ask_gemma_brain(user_text):
         except Exception as e:
             return {"message": f"ERROR_COMMUNICATION: {str(e)}", "action": "NONE"}
 
+async def classify_image_intent(user_text: str, base64_image: str) -> str:
+    """Gemma 4를 통해 수신한 이미지가 시간표(SCHEDULE_SYNC)인지 일반 대화용 사진(IMAGE_CHAT)인지 분석"""
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            with open(SOUL_FILE, "r", encoding="utf-8") as f:
+                soul_context = f.read()
+                
+            prompt = (
+                f"{soul_context}\n\n"
+                "마스터가 사진과 함께 다음 메시지를 보냈습니다: '" + (user_text if user_text else "(텍스트 없음)") + "'\n\n"
+                "이 사진과 메시지를 보고, 다음 둘 중 하나로만 철저하게 판단해줘:\n"
+                "- SCHEDULE_SYNC: 이미지에서 주간 근무 시간표를 추출하여 캘린더 일정을 등록해야 하는 요청인 경우.\n"
+                "- IMAGE_CHAT: 캘린더 등록이 아니라, 마스터가 사진을 보며 대화하거나 질문하려는 일반적인 상황인 경우.\n\n"
+                "응답은 반드시 오직 'SCHEDULE_SYNC' 또는 'IMAGE_CHAT'이라는 단어로만 답변해야 해. 다른 부가 설명은 절대 하지마."
+            )
+            
+            brain_url = os.getenv("BRAIN_URL", "http://100.84.129.54:1234/v1")
+            response = await client.post(
+                f"{brain_url}/chat/completions",
+                json={
+                    "model": os.getenv("MODEL_NAME", "gemma-4-e4b-it"),
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "temperature": 0.0,
+                    "stream": False
+                }
+            )
+            data = response.json()
+            raw_content = data["choices"][0]["message"]["content"].strip()
+            
+            if "SCHEDULE_SYNC" in raw_content:
+                return "SCHEDULE_SYNC"
+            else:
+                return "IMAGE_CHAT"
+                
+        except Exception as e:
+            logging.error(f"Gemma intent classification error: {e}")
+            # 에러 발생 시 안전하게 일반 사진 대화로 진행
+            return "IMAGE_CHAT"
+
 async def execute_capture_skill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """맥북 캡처 스킬 실행 및 텔레그램 업로드 (정상 복구본)"""
     await update.message.reply_text("📸 맥북 화면을 캡처합니다...")
@@ -131,13 +183,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sync_result = sync_res.json()
                 
                 if sync_result.get("status") == "success":
-                    message = sync_result.get("message", "캘린더 등록이 성공적으로 완료되었습니다!")
+                    message = sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
                     await update.message.reply_text(f"🚀 {message}")
                 else:
-                    error_msg = sync_result.get("message", "분석 중 오류가 발생했습니다.")
+                    error_msg = sync_result.get("message", "죄송합니다, 마스터. 일정 분석 및 캘린더 등록에 실패했습니다. 이미지 상태를 다시 확인해 주시겠습니까?")
                     await update.message.reply_text(f"❌ 동기화 실패: {error_msg}")
             else:
-                await update.message.reply_text(f"❌ 업로드 실패: {upload_data.get('message')}")
+                await update.message.reply_text(f"❌ 업로드 실패: 마스터, 이미지 업로드에 실패했습니다. 다시 전송해 주시겠습니까?")
                 
     except Exception as e:
         logging.error(f"Schedule sync error: {e}")
@@ -263,14 +315,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 attachment_data = None
             
             if attachment_type == "image" and attachment_data:
-                # 1. Base64 이미지 디코딩
+                # 1. 의도 분류 실행 (Gemma 4 비전 모델 분석)
+                intent = await classify_image_intent(text, attachment_data)
+                logging.info(f"Image intent classified as: {intent}")
+                
+                # 2. Base64 이미지 디코딩
                 import base64
                 try:
                     image_bytes = base64.b64decode(attachment_data)
                     temp_filename = f"schedule_{message_id}.jpg"
                     
                     async with httpx.AsyncClient(timeout=120.0) as client:
-                        # 2. 맥북 서버로 이미지 업로드 (Multipart form-data)
+                        # 3. 맥북 서버로 이미지 업로드 (Multipart form-data)
                         files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
                         upload_res = await client.post(f"{MACBOOK_URL}/upload", files=files)
                         upload_res.raise_for_status()
@@ -278,19 +334,36 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         if upload_data.get("status") == "success":
                             uploaded_filename = upload_data.get("filename")
-                            logging.info(f"WS Image Upload Success: {uploaded_filename}, starting sync...")
                             
-                            # 3. 캘린더 동기화 실행
-                            sync_res = await client.get(f"{MACBOOK_URL}/sync_calendar/{uploaded_filename}")
-                            sync_res.raise_for_status()
-                            sync_result = sync_res.json()
-                            
-                            if sync_result.get("status") == "success":
-                                response_message = sync_result.get("message", "캘린더 등록이 완료되었습니다!")
+                            if intent == "SCHEDULE_SYNC":
+                                # [시간표 등록 분기]
+                                logging.info(f"Starting schedule sync for {uploaded_filename}...")
+                                sync_res = await client.get(f"{MACBOOK_URL}/sync_calendar/{uploaded_filename}")
+                                sync_res.raise_for_status()
+                                sync_result = sync_res.json()
+                                
+                                if sync_result.get("status") == "success":
+                                    response_message = sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
+                                else:
+                                    response_message = f"❌ 동기화 실패: {sync_result.get('message')}"
                             else:
-                                response_message = f"❌ 동기화 실패: {sync_result.get('message')}"
+                                # [일반 사진 대화 분기 - chat_with_image API 호출]
+                                logging.info(f"Starting multimodal image chat for {uploaded_filename}...")
+                                chat_files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
+                                chat_res = await client.post(
+                                    f"{MACBOOK_URL}/chat_with_image",
+                                    params={"prompt": text},
+                                    files=chat_files
+                                )
+                                chat_res.raise_for_status()
+                                chat_result = chat_res.json()
+                                
+                                if chat_result.get("status") == "success":
+                                    response_message = chat_result.get("message")
+                                else:
+                                    response_message = f"❌ 분석 실패: {chat_result.get('message')}"
                         else:
-                            response_message = f"❌ 업로드 실패: {upload_data.get('message')}"
+                            response_message = "❌ 업로드 실패: 마스터, 이미지 업로드에 실패했습니다. 다시 전송해 주시겠습니까?"
                 except Exception as e:
                     logging.error(f"WS Image Sync Error: {e}")
                     response_message = f"❌ 시스템 에러: {str(e)}"
