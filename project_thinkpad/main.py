@@ -246,15 +246,59 @@ async def websocket_endpoint(websocket: WebSocket):
     logging.info("WebSocket connected from iOS app")
     try:
         while True:
-            # 앱이 보낸 텍스트 메시지 수신
+            # 앱이 보낸 텍스트/JSON 데이터 수신
             data = await websocket.receive_text()
             logging.info(f"Received from WS: {data}")
             
-            # 기존 브레인 엔진(Gemma)에 의도 분석 요청
-            decision = await ask_gemma_brain(data)
+            try:
+                message_json = json.loads(data)
+                text = message_json.get("text", "")
+                attachment_type = message_json.get("attachment_type")
+                attachment_data = message_json.get("attachment_data")
+                attachment_name = message_json.get("attachment_name", "upload.jpg")
+                message_id = message_json.get("message_id", "ws")
+            except json.JSONDecodeError:
+                text = data
+                attachment_type = None
+                attachment_data = None
             
-            # 분석 결과에서 message 내용을 추출하여 iOS 앱에 전송
-            response_message = decision.get("message", "")
+            if attachment_type == "image" and attachment_data:
+                # 1. Base64 이미지 디코딩
+                import base64
+                try:
+                    image_bytes = base64.b64decode(attachment_data)
+                    temp_filename = f"schedule_{message_id}.jpg"
+                    
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        # 2. 맥북 서버로 이미지 업로드 (Multipart form-data)
+                        files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
+                        upload_res = await client.post(f"{MACBOOK_URL}/upload", files=files)
+                        upload_res.raise_for_status()
+                        upload_data = upload_res.json()
+                        
+                        if upload_data.get("status") == "success":
+                            uploaded_filename = upload_data.get("filename")
+                            logging.info(f"WS Image Upload Success: {uploaded_filename}, starting sync...")
+                            
+                            # 3. 캘린더 동기화 실행
+                            sync_res = await client.get(f"{MACBOOK_URL}/sync_calendar/{uploaded_filename}")
+                            sync_res.raise_for_status()
+                            sync_result = sync_res.json()
+                            
+                            if sync_result.get("status") == "success":
+                                response_message = sync_result.get("message", "캘린더 등록이 완료되었습니다!")
+                            else:
+                                response_message = f"❌ 동기화 실패: {sync_result.get('message')}"
+                        else:
+                            response_message = f"❌ 업로드 실패: {upload_data.get('message')}"
+                except Exception as e:
+                    logging.error(f"WS Image Sync Error: {e}")
+                    response_message = f"❌ 시스템 에러: {str(e)}"
+            else:
+                # 기존 일반 텍스트 브레인 엔진 분석 요청 (JSON 데이터 전체가 아닌 추출된 text 필드만 전달)
+                decision = await ask_gemma_brain(text)
+                response_message = decision.get("message", "")
+            
             await websocket.send_text(response_message)
             logging.info(f"Sent to WS: {response_message}")
             

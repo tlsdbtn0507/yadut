@@ -1,7 +1,7 @@
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from main import parse_brain_response, handle_message
+from main import parse_brain_response, handle_message, websocket_endpoint
 
 # 1. parse_brain_response 테스트 (단순 함수)
 def test_parse_brain_response_normal():
@@ -102,3 +102,54 @@ async def test_handle_photo_success(mock_get, mock_post):
     
     # Verify final success message
     update.message.reply_text.assert_any_call("🚀 Calendar updated")
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("httpx.AsyncClient.get")
+async def test_websocket_image_sync_success(mock_get, mock_post):
+    # Mock WebSocket object
+    websocket = AsyncMock()
+    
+    # Mock message payload (containing image base64 data)
+    import base64
+    fake_image_base64 = base64.b64encode(b"fake_image_data").decode("utf-8")
+    payload = {
+        "text": "이 스케줄 대 내 캘린더에 넣어줘",
+        "attachment_type": "image",
+        "attachment_data": fake_image_base64,
+        "attachment_name": "IMG_123.jpg",
+        "message_id": "test_msg_id"
+    }
+    
+    # Set receive_text to yield our payload, then raise WebSocketDisconnect to stop the loop
+    from fastapi import WebSocketDisconnect
+    websocket.receive_text = AsyncMock(side_effect=[json.dumps(payload), WebSocketDisconnect()])
+    
+    # Mock httpx.post response for upload
+    mock_upload_res = MagicMock()
+    mock_upload_res.status_code = 200
+    mock_upload_res.json.return_value = {
+        "status": "success", 
+        "filename": "remote_schedule_test_msg_id.png",
+        "message": "File uploaded"
+    }
+    mock_post.return_value = mock_upload_res
+    
+    # Mock httpx.get response for sync
+    mock_sync_res = MagicMock()
+    mock_sync_res.status_code = 200
+    mock_sync_res.json.return_value = {"status": "success", "message": "Calendar updated"}
+    mock_get.return_value = mock_sync_res
+    
+    # Run the endpoint (will terminate on WebSocketDisconnect)
+    await websocket_endpoint(websocket)
+    
+    # Verify that the photo was uploaded and sync_calendar was called
+    mock_post.assert_called_once()
+    assert "upload" in mock_post.call_args[0][0]
+    
+    mock_get.assert_called_once()
+    assert "sync_calendar/remote_schedule_test_msg_id.png" in mock_get.call_args[0][0]
+    
+    # Verify that the success message was sent back via WebSocket
+    websocket.send_text.assert_called_once_with("Calendar updated")

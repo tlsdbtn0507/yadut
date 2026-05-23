@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File
 import subprocess
 import os
+import shutil
 from datetime import datetime
 import uvicorn
 from fastapi.responses import FileResponse
+from calendar_sync import sync_image_to_calendar
 
 app = FastAPI()
 
@@ -52,6 +54,40 @@ async def download_file(filename: str):
     if os.path.exists(filepath):
         return FileResponse(filepath)
     return {"status": "error", "message": "파일을 찾을 수 없습니다."}
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    try:
+        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"remote_{now}_{file.filename}"
+        filepath = os.path.join(SCREENSHOT_DIR, filename)
+        
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {
+            "status": "success",
+            "filename": filename,
+            "message": "이미지가 성공적으로 업로드되었습니다."
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/sync_calendar/{filename}")
+async def sync_calendar(filename: str):
+    try:
+        filepath = os.path.join(SCREENSHOT_DIR, filename)
+        if not os.path.exists(filepath):
+            return {"status": "error", "message": "파일을 찾을 수 없습니다."}
+        
+        success = sync_image_to_calendar(filepath, use_local=False)
+        if success:
+            return {"status": "success", "message": "캘린더 동기화가 성공적으로 완료되었습니다!"}
+        else:
+            return {"status": "error", "message": "스케줄 추출 및 캘린더 등록에 실패했습니다."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/create_file")
 async def create_file(item: dict):
