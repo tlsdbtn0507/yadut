@@ -54,9 +54,13 @@ async def test_handle_message_routing_capture(mock_capture, mock_ask):
     await handle_message(update, context)
     
 @pytest.mark.asyncio
+@patch("main.classify_image_intent")
 @patch("httpx.AsyncClient.post")
 @patch("httpx.AsyncClient.get")
-async def test_handle_photo_success(mock_get, mock_post):
+async def test_handle_photo_success(mock_get, mock_post, mock_classify):
+    # Mock intent classification to return SCHEDULE_SYNC
+    mock_classify.return_value = "SCHEDULE_SYNC"
+    
     # Mock Telegram Update/Context
     update = AsyncMock()
     
@@ -104,9 +108,13 @@ async def test_handle_photo_success(mock_get, mock_post):
     update.message.reply_text.assert_any_call("🚀 Calendar updated")
 
 @pytest.mark.asyncio
+@patch("main.classify_image_intent")
 @patch("httpx.AsyncClient.post")
 @patch("httpx.AsyncClient.get")
-async def test_websocket_image_sync_success(mock_get, mock_post):
+async def test_websocket_image_sync_success(mock_get, mock_post, mock_classify):
+    # Mock intent classification to return SCHEDULE_SYNC
+    mock_classify.return_value = "SCHEDULE_SYNC"
+    
     # Mock WebSocket object
     websocket = AsyncMock()
     
