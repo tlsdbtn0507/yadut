@@ -140,35 +140,7 @@ struct MainConsoleView: View {
                             Divider()
                                 .background(Color.white.opacity(0.08))
                             
-                            // Option 2: Add File from Drive (sf: triangle)
-                            Button(action: {
-                                withAnimation {
-                                    showAttachmentMenu = false
-                                    showFilePicker = true
-                                }
-                            }) {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "triangle")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundColor(.white.opacity(0.8))
-                                        .frame(width: 18)
-                                    
-                                    Text("Drive에서 파일 추가")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(Color.white.opacity(0.01))
-                            }
-                            .buttonStyle(MenuRowButtonStyle())
-                            
-                            Divider()
-                                .background(Color.white.opacity(0.08))
-                            
-                            // Option 3: Upload More (sf: ellipsis) - triggers photo library
+                            // Option 2: Add Photo from Photo Library (sf: photo.fill)
                             Button(action: {
                                 withAnimation {
                                     showAttachmentMenu = false
@@ -176,20 +148,16 @@ struct MainConsoleView: View {
                                 }
                             }) {
                                 HStack(spacing: 12) {
-                                    Image(systemName: "ellipsis")
+                                    Image(systemName: "photo.fill")
                                         .font(.system(size: 13, weight: .bold))
                                         .foregroundColor(.white.opacity(0.8))
                                         .frame(width: 18)
                                     
-                                    Text("업로드 더보기")
+                                    Text("사진 앱에서 사진 추가")
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundColor(.white)
                                     
                                     Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(.white.opacity(0.3))
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 14)
