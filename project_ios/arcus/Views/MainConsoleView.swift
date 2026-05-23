@@ -527,7 +527,7 @@ struct MainConsoleView: View {
         }
     }
     
-    // MARK: - 4b. High-Fidelity Glassmorphic Typing Indicator Bubble
+    // MARK: - 4b. High-Fidelity Glassmorphic Typing Indicator Bubble (5-Step Network Visualizer)
     private var typingIndicatorBubble: some View {
         HStack(alignment: .top, spacing: 10) {
             // Arcus Avatar Icon
@@ -553,7 +553,7 @@ struct MainConsoleView: View {
                     .padding(.horizontal, 4)
                 
                 // Bubble Main Frame containing dynamic telemetry
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     // Stage Header (Icon + Monospace Title + Step Indicators)
                     HStack(spacing: 6) {
                         Image(systemName: viewModel.processStage.icon)
@@ -566,19 +566,57 @@ struct MainConsoleView: View {
                         
                         Spacer()
                         
-                        // Three-Dot Stage Progress Lights
+                        // Five-Dot Stage Progress Lights
                         HStack(spacing: 3) {
-                            ForEach(0..<3) { idx in
+                            ForEach(0..<5) { idx in
                                 Circle()
                                     .fill(viewModel.processStage.rawValue == idx ? viewModel.processStage.color : Color.white.opacity(0.15))
                                     .frame(width: 4, height: 4)
-                                    .scaleEffect(viewModel.processStage.rawValue == idx ? 1.2 : 1.0)
+                                    .scaleEffect(viewModel.processStage.rawValue == idx ? 1.25 : 1.0)
                             }
                         }
                     }
-                    .frame(width: 200)
+                    .frame(width: 250)
                     
-                    // Main Status Label with Wave Pulsing Dots
+                    // 1. Horizontal Node Visualizer Chain
+                    HStack(spacing: 0) {
+                        let nodeLabels = ["iOS", "THK", "MAC", "GEM", "ARC"]
+                        ForEach(0..<5) { idx in
+                            let label = nodeLabels[idx]
+                            let isCompleted = viewModel.processStage.rawValue >= idx
+                            let isActive = viewModel.processStage.rawValue == idx
+                            let nodeColor = isActive ? viewModel.processStage.color : (isCompleted ? Color.cyan.opacity(0.7) : Color.white.opacity(0.12))
+                            
+                            Text(label)
+                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                .foregroundColor(nodeColor)
+                                .frame(width: 24, height: 24)
+                                .background(
+                                    Circle()
+                                        .fill(nodeColor.opacity(isActive ? 0.22 : 0.04))
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(nodeColor, lineWidth: isActive ? 1.5 : 0.75)
+                                )
+                                .shadow(color: nodeColor.opacity(isActive ? 0.6 : 0), radius: 4)
+                                .scaleEffect(isActive ? 1.15 : 1.0)
+                            
+                            if idx < 4 {
+                                let lineActive = viewModel.processStage.rawValue > idx
+                                let lineColor = lineActive ? Color.cyan.opacity(0.7) : Color.white.opacity(0.12)
+                                
+                                Rectangle()
+                                    .fill(lineColor)
+                                    .frame(height: 1.0)
+                                    .frame(width: 22)
+                            }
+                        }
+                    }
+                    .frame(width: 250, alignment: .center)
+                    .padding(.vertical, 4)
+                    
+                    // 2. Main Status Label with Wave Pulsing Dots
                     HStack(spacing: 6) {
                         HStack(spacing: 3) {
                             TypingIndicatorDot(color: viewModel.processStage.color, delay: 0.0)
@@ -587,9 +625,12 @@ struct MainConsoleView: View {
                         }
                         
                         Text(viewModel.processStage.description)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white.opacity(0.9))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.95))
                     }
+                    
+                    // 3. Dynamic Telemetry Terminal Area
+                    terminalTraceLogView
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -619,6 +660,63 @@ struct MainConsoleView: View {
             
             Spacer()
         }
+    }
+    
+    // Dynamic Telemetry Trace Terminal Log View
+    private var terminalTraceLogView: some View {
+        let activeLogs = getActiveLogs(for: viewModel.processStage)
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(activeLogs, id: \.self) { log in
+                Text(log)
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.37).opacity(0.85)) // Cyber Green
+            }
+        }
+        .padding(10)
+        .frame(width: 250, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.black.opacity(0.65))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.white.opacity(0.08), lineWidth: 0.75)
+        )
+    }
+    
+    // Generates active logs depending on the current process stage
+    private func getActiveLogs(for stage: MainConsoleViewModel.ArcusProcessStage) -> [String] {
+        var logs: [String] = []
+        
+        logs.append("0.02s [UPLINK] CONNECTING ON AD-HOC BEACON...")
+        logs.append("0.15s [UPLINK] TRANSMITTING PACKET STREAM...")
+        logs.append("0.38s [UPLINK] ENCODING BASE64 STREAM DATA...")
+        
+        if stage.rawValue >= 1 {
+            logs.append("0.62s [BRIDGE] DECODING STREAM ON THINKPAD...")
+            logs.append("0.85s [BRIDGE] LAUNCHING GEMMA-4 COGNITION...")
+            logs.append("1.20s [BRIDGE] REASONING MESSAGE INTENT...")
+        }
+        
+        if stage.rawValue >= 2 {
+            logs.append("1.82s [BRIDGE] INTENT ANALYSIS COMPLETED.")
+            logs.append("2.05s [CORE] INITIATING FILE UPLOAD TO MACBOOK...")
+            logs.append("2.35s [CORE] UPLOADING ATTACHMENT TO STORAGE... OK")
+        }
+        
+        if stage.rawValue >= 3 {
+            logs.append("2.72s [NEURAL] ENGAGING GEMINI SYNAPSE ENGINE...")
+            logs.append("3.15s [NEURAL] ANALYZING COGNITIVE DATA...")
+            logs.append("3.82s [NEURAL] DEEP MULTI-MODAL SYNTHESIS...")
+        }
+        
+        if stage.rawValue >= 4 {
+            logs.append("4.45s [PERS] PARSING RAW COMPLETIONS RESPONSE...")
+            logs.append("4.72s [PERS] INJECTING SOUL.MD PERSONA RULES...")
+            logs.append("4.98s [DOWNLINK] FORMATTING COMPLIANT DIALOGUE...")
+        }
+        
+        return logs
     }
     
     // Empty state when there are no messages

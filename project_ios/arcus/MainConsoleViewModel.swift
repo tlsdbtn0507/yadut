@@ -3,41 +3,51 @@ import Combine
 import SwiftUI
 
 class MainConsoleViewModel: ObservableObject {
-    /// 아르커스 인공지능 신호 처리 파이프라인 단계
-    enum ArcusProcessStage: Int {
-        case transmitting = 0
-        case processing = 1
-        case receiving = 2
+    /// 아르커스 인공지능 신호 처리 파이프라인 단계 (5단계 고도화 터미널 체인)
+    enum ArcusProcessStage: Int, CaseIterable {
+        case clientTx = 0
+        case thinkpadGemma = 1
+        case macbookUpload = 2
+        case geminiNeural = 3
+        case responseRx = 4
         
         var title: String {
             switch self {
-            case .transmitting: return "TRANSMITTING DATA STREAM"
-            case .processing: return "THINKPAD COGNITIVE ANALYSIS"
-            case .receiving: return "DOWNLOADING RESPONSE"
+            case .clientTx: return "1. UPLINK TRANSMISSION"
+            case .thinkpadGemma: return "2. THINKPAD NEURAL COGNITION"
+            case .macbookUpload: return "3. MACBOOK HOST BRIDGE"
+            case .geminiNeural: return "4. GEMINI VISION SYNAPSE"
+            case .responseRx: return "5. DOWNLINK RESPONSE GENERATION"
             }
         }
         
         var description: String {
             switch self {
-            case .transmitting: return "씽크패드로 신호 송신 중..."
-            case .processing: return "씽크패드 분석 및 의도 파악 중..."
-            case .receiving: return "답변 데이터 동기화 중..."
+            case .clientTx: return "씽크패드로 비디오/텍스트 신호 송신 중..."
+            case .thinkpadGemma: return "Gemma 4 비전 모델로 유저 의도 판단 중..."
+            case .macbookUpload: return "맥북 서버로 데이터 업로드 및 환경 분석 중..."
+            case .geminiNeural: return "Gemini 3.1 모델 기반 고밀도 이미지 분석 중..."
+            case .responseRx: return "아르커스 정체성 필터 적용 및 응답 전송 중..."
             }
         }
         
         var icon: String {
             switch self {
-            case .transmitting: return "antenna.radiowaves.left.and.right"
-            case .processing: return "brain.head.profile"
-            case .receiving: return "arrow.triangle.2.circlepath"
+            case .clientTx: return "arrow.up.circle.fill"
+            case .thinkpadGemma: return "brain.head.profile"
+            case .macbookUpload: return "laptopcomputer"
+            case .geminiNeural: return "eye.circle.fill"
+            case .responseRx: return "checkmark.circle.fill"
             }
         }
         
         var color: Color {
             switch self {
-            case .transmitting: return Color(red: 0.0, green: 0.78, blue: 1.0) // Cyber blue/cyan
-            case .processing: return Color.purple // Brain Purple
-            case .receiving: return Color(red: 0.0, green: 0.95, blue: 0.37) // Connected Green
+            case .clientTx: return Color(red: 0.0, green: 0.78, blue: 1.0) // Cyan
+            case .thinkpadGemma: return Color.purple // Brain Purple
+            case .macbookUpload: return Color.orange // Host Orange
+            case .geminiNeural: return Color(red: 1.0, green: 0.35, blue: 0.35) // Deep Red/Pink
+            case .responseRx: return Color(red: 0.0, green: 0.95, blue: 0.37) // Connected Green
             }
         }
     }
@@ -51,7 +61,7 @@ class MainConsoleViewModel: ObservableObject {
     @Published var connectionStatus: WebSocketStatus = .disconnected
     @Published var audioLevel: CGFloat = 0.0
     @Published var isArcusThinking = false
-    @Published var processStage: ArcusProcessStage = .transmitting
+    @Published var processStage: ArcusProcessStage = .clientTx
     @Published var selectedAttachment: SelectedAttachment? = nil
     
     private let webSocketManager: WebSocketManagerProtocol
@@ -118,29 +128,43 @@ class MainConsoleViewModel: ObservableObject {
         }
     }
     
-    /// 아르커스 신호 분석 단계를 시뮬레이션하여 유저에게 가시화합니다.
+    /// 아르커스 신호 분석 단계를 시뮬레이션하여 유저에게 가시화합니다. (고밀도 유동 지연 적용)
     private func startThinkingSimulation() {
         isArcusThinking = true
-        processStage = .transmitting
+        processStage = .clientTx
         
         stageTimer?.cancel()
-        stageTimer = Timer.publish(every: 1.2, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                guard let self = self, self.isArcusThinking else {
-                    self?.stageTimer?.cancel()
-                    return
+        
+        // 실제 인프라 지연 상황을 반영한 유기적이고 고밀도 타이밍 설정
+        let stageDelays: [Double] = [0.6, 1.4, 0.8, 1.8, 0.5]
+        var currentStageIndex = 0
+        
+        func runNextStage() {
+            guard isArcusThinking else { return }
+            if currentStageIndex < ArcusProcessStage.allCases.count - 1 {
+                currentStageIndex += 1
+                if let nextStage = ArcusProcessStage(rawValue: currentStageIndex) {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        self.processStage = nextStage
+                    }
+                    let delay = stageDelays[currentStageIndex]
+                    stageTimer = Just(())
+                        .delay(for: .seconds(delay), scheduler: DispatchQueue.main)
+                        .sink { _ in
+                            runNextStage()
+                        }
                 }
-                
-                switch self.processStage {
-                case .transmitting:
-                    self.processStage = .processing
-                case .processing:
-                    self.processStage = .receiving
-                case .receiving:
-                    // 사이클 반복 (서버 응답 대기 지연 시)
-                    self.processStage = .transmitting
-                }
+            } else {
+                // 최종 응답 수신 대기 상태 유지
+                self.processStage = .responseRx
+            }
+        }
+        
+        let firstDelay = stageDelays[0]
+        stageTimer = Just(())
+            .delay(for: .seconds(firstDelay), scheduler: DispatchQueue.main)
+            .sink { _ in
+                runNextStage()
             }
     }
     

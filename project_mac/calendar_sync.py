@@ -267,13 +267,27 @@ def chat_about_image(prompt: str, image_path: str) -> str:
         if not prompt or prompt.strip() == "":
             prompt = "마스터가 텍스트 질문 없이 이미지만 보내주셨습니다. 이 사진이 무엇인지 정중하게 마스터께 묘사해 드리고 친근하게 말을 걸어보십시오."
             
+        import re
+        
         model = genai.GenerativeModel(model_name)
         response = model.generate_content([
             system_instruction + "\n\n마스터의 질문: " + prompt,
             {"mime_type": "image/png", "data": image_data}
         ])
         
-        return response.text
+        raw_text = response.text
+        # JSON 블록이 감싸져서 반환될 수 있으므로 정밀하게 파싱 시도
+        cleaned = raw_text.strip()
+        cleaned = re.sub(r"^```(?:json)?\n?", "", cleaned).strip()
+        cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict) and "message" in parsed:
+                return parsed["message"]
+        except Exception:
+            pass
+            
+        return raw_text
         
     except Exception as e:
         return f"죄송합니다, 마스터. 사진 분석 중 시스템 내부 오류가 발생했습니다: {str(e)}"
