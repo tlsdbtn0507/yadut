@@ -9,6 +9,7 @@ struct MainConsoleView: View {
     @State private var showAttachmentSourceSheet = false
     @State private var showPhotosPicker = false
     @State private var showFilePicker = false
+    @State private var showAttachmentMenu = false
     
     // For PhotosPicker (requires PhotosUI)
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
@@ -93,6 +94,129 @@ struct MainConsoleView: View {
                 // 3. Floating Premium Input & Control Area
                 controlArea
             }
+            
+            // Custom Gemini-style Dark Dropdown Menu Overlay
+            if showAttachmentMenu {
+                // Transparent backdrop to dismiss overlay on tap
+                Color.black.opacity(0.01)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showAttachmentMenu = false
+                        }
+                    }
+                
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Option 1: File Upload (sf: paperclip)
+                            Button(action: {
+                                withAnimation {
+                                    showAttachmentMenu = false
+                                    showFilePicker = true
+                                }
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "paperclip")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .frame(width: 18)
+                                    
+                                    Text("파일 업로드")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .background(Color.white.opacity(0.01))
+                            }
+                            .buttonStyle(MenuRowButtonStyle())
+                            
+                            Divider()
+                                .background(Color.white.opacity(0.08))
+                            
+                            // Option 2: Add File from Drive (sf: triangle)
+                            Button(action: {
+                                withAnimation {
+                                    showAttachmentMenu = false
+                                    showFilePicker = true
+                                }
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "triangle")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .frame(width: 18)
+                                    
+                                    Text("Drive에서 파일 추가")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .background(Color.white.opacity(0.01))
+                            }
+                            .buttonStyle(MenuRowButtonStyle())
+                            
+                            Divider()
+                                .background(Color.white.opacity(0.08))
+                            
+                            // Option 3: Upload More (sf: ellipsis) - triggers photo library
+                            Button(action: {
+                                withAnimation {
+                                    showAttachmentMenu = false
+                                    showPhotosPicker = true
+                                }
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .frame(width: 18)
+                                    
+                                    Text("업로드 더보기")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.3))
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .background(Color.white.opacity(0.01))
+                            }
+                            .buttonStyle(MenuRowButtonStyle())
+                        }
+                        .frame(width: 210)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(red: 0.1, green: 0.11, blue: 0.13).opacity(0.96))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                        )
+                        .shadow(color: Color.black.opacity(0.35), radius: 12, x: 0, y: 6)
+                        .padding(.trailing, 20)
+                        // Aligned perfectly above the text capsule & optional preview bar
+                        .padding(.bottom, viewModel.selectedAttachment != nil ? 134 : 78)
+                    }
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .bottomTrailing)),
+                    removal: .opacity.combined(with: .scale(scale: 0.92, anchor: .bottomTrailing))
+                ))
+            }
         }
         .onAppear {
             viewModel.connect()
@@ -121,15 +245,6 @@ struct MainConsoleView: View {
         }
         .onDisappear {
             timer?.invalidate()
-        }
-        .confirmationDialog("첨부 파일 선택", isPresented: $showAttachmentSourceSheet, titleVisibility: .visible) {
-            Button("사진 첨부 (라이브러리)") {
-                showPhotosPicker = true
-            }
-            Button("파일 첨부 (파일 앱)") {
-                showFilePicker = true
-            }
-            Button("취소", role: .cancel) {}
         }
         .photosPicker(
             isPresented: $showPhotosPicker,
@@ -841,14 +956,19 @@ struct MainConsoleView: View {
                             .accentColor(Color.cyan)
                         
                         // Futuristic Attachment Paperclip Button
-                        Button(action: { showAttachmentSourceSheet = true }) {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 17, weight: .bold))
-                                .foregroundColor(viewModel.selectedAttachment != nil ? Color.cyan : .white.opacity(0.4))
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showAttachmentMenu.toggle()
+                            }
+                        }) {
+                            Image(systemName: showAttachmentMenu ? "xmark" : "paperclip")
+                                .font(.system(size: showAttachmentMenu ? 14 : 17, weight: .bold))
+                                .foregroundColor(viewModel.selectedAttachment != nil || showAttachmentMenu ? Color.cyan : .white.opacity(0.4))
                                 .padding(.horizontal, 6)
-                                .shadow(color: viewModel.selectedAttachment != nil ? Color.cyan.opacity(0.3) : .clear, radius: 4)
-                                .scaleEffect(viewModel.selectedAttachment != nil ? 1.15 : 1.0)
-                                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: viewModel.selectedAttachment)
+                                .shadow(color: viewModel.selectedAttachment != nil || showAttachmentMenu ? Color.cyan.opacity(0.3) : .clear, radius: 4)
+                                .scaleEffect(viewModel.selectedAttachment != nil || showAttachmentMenu ? 1.15 : 1.0)
+                                .rotationEffect(.degrees(showAttachmentMenu ? 90 : 0))
+                                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: showAttachmentMenu)
                         }
                         
                         Button(action: { viewModel.sendMessage() }) {
@@ -979,6 +1099,14 @@ struct TypingIndicatorDot: View {
                     pulse = true
                 }
             }
+    }
+}
+
+struct MenuRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Color.white.opacity(0.08) : Color.clear)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 
