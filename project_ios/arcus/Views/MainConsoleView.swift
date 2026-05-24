@@ -662,25 +662,27 @@ struct MainConsoleView: View {
         }
     }
     
-    // Dynamic Telemetry Trace Terminal Log View
+    // Dynamic Telemetry Trace Terminal Log View (Sleek Compact 1-Line Display)
     private var terminalTraceLogView: some View {
         let activeLogs = getActiveLogs(for: viewModel.processStage)
-        return VStack(alignment: .leading, spacing: 4) {
-            ForEach(activeLogs, id: \.self) { log in
-                Text(log)
-                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.37).opacity(0.85)) // Cyber Green
-            }
+        let lastLog = activeLogs.last ?? ""
+        return HStack(spacing: 4) {
+            Text(">")
+                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                .foregroundColor(viewModel.processStage.color)
+            Text(lastLog)
+                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.37).opacity(0.9)) // Cyber Green
+                .lineLimit(1)
         }
-        .padding(10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
         .frame(width: 250, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.black.opacity(0.65))
-        )
+        .background(Color.black.opacity(0.35))
+        .cornerRadius(4)
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.75)
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
         )
     }
     
@@ -795,9 +797,35 @@ struct MainConsoleView: View {
                     }
                     
                     if !text.isEmpty {
-                        Text(text)
-                            .font(.system(size: 14.5, weight: .medium))
-                            .foregroundColor(.white)
+                        let parsed = parseMemoryUpdate(from: text)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(parsed.cleanText)
+                                .font(.system(size: 14.5, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            if let memoryUpdate = parsed.memoryUpdate {
+                                Divider()
+                                    .background(Color.purple.opacity(0.3))
+                                    .padding(.vertical, 2)
+                                
+                                HStack(spacing: 5) {
+                                    Image(systemName: "brain.head.profile")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.purple)
+                                    Text("기억 업데이트: \(memoryUpdate)")
+                                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(.purple.opacity(0.9))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color.purple.opacity(0.12))
+                                .cornerRadius(4)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(Color.purple.opacity(0.25), lineWidth: 0.5)
+                                )
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -859,6 +887,24 @@ struct MainConsoleView: View {
             
             if !isUser { Spacer() }
         }
+    }
+    
+    // Splits [MEMORY_UPDATE: ...] from the message text
+    private func parseMemoryUpdate(from messageText: String) -> (cleanText: String, memoryUpdate: String?) {
+        guard let rangeStart = messageText.range(of: "[MEMORY_UPDATE:") else {
+            return (messageText, nil)
+        }
+        
+        let cleanText = messageText[..<rangeStart.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let remaining = messageText[rangeStart.upperBound...]
+        guard let rangeEnd = remaining.range(of: "]") else {
+            let update = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (cleanText, update.isEmpty ? nil : update)
+        }
+        
+        let update = remaining[..<rangeEnd.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cleanText, update.isEmpty ? nil : update)
     }
     
     // Bubble media renderer
