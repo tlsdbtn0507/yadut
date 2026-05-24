@@ -295,7 +295,29 @@ async def health():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    logging.info("WebSocket connected from iOS app")
+    logging.info("WebSocket connected from client")
+    
+    # --- [Stage 1 Security Handshake] ---
+    WS_TOKEN = os.getenv("WS_TOKEN", "SECRET_KEY")
+    try:
+        # Wait up to 3.0 seconds for the first auth message
+        auth_data_raw = await asyncio.wait_for(websocket.receive_text(), timeout=3.0)
+        auth_json = json.loads(auth_data_raw)
+        
+        if auth_json.get("type") == "auth" and auth_json.get("token") == WS_TOKEN:
+            # Send the secure success acknowledgement packet
+            await websocket.send_text(json.dumps({"type": "auth_success"}))
+            logging.info("WebSocket secure authentication successful.")
+        else:
+            logging.warning("WebSocket authentication failed: Invalid token.")
+            await websocket.close(code=4003)
+            return
+    except Exception as e:
+        logging.warning(f"WebSocket authentication failed / timeout: {e}")
+        await websocket.close(code=4003)
+        return
+    # -------------------------------------
+    
     try:
         while True:
             # 앱이 보낸 텍스트/JSON 데이터 수신
