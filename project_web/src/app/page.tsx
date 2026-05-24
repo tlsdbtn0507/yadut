@@ -16,8 +16,12 @@ interface Message {
   memoryUpdates?: string[]
 }
 
-const THINKPAD_WS_URL = 'ws://100.122.25.31:8000/ws'
-const SECURE_TOKEN = 'SECRET_KEY'
+const THINKPAD_WS_URL = process.env.NEXT_PUBLIC_THINKPAD_WS_URL ?? 'ws://100.122.25.31:8000/ws'
+const SECURE_TOKEN = process.env.NEXT_PUBLIC_WS_TOKEN ?? 'SECRET_KEY'
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error'
+}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
@@ -40,9 +44,7 @@ export default function Home() {
 
   // Telemetry state inside thinking cycle
   const [isThinking, setIsThinking] = useState<boolean>(false)
-  const [telemetryMode, setTelemetryMode] = useState<TelemetryMode>(TelemetryMode.TEXT)
   const [telemetryStage, setTelemetryStage] = useState<TelemetryStage>(TelemetryStage.CLIENT_TX)
-  const [telemetryDuration, setTelemetryDuration] = useState<number>(0)
   const [telemetryLog, setTelemetryLog] = useState<string>('')
 
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -134,38 +136,31 @@ export default function Home() {
   }
 
   // Trigger biological / network simulation matching exact Stage 3/5 timing
-  const runThinkingSimulation = async (isImage: boolean): Promise<any> => {
-    return new Promise(async (resolve) => {
-      const mode = isImage ? TelemetryMode.IMAGE : TelemetryMode.TEXT
-      setTelemetryMode(mode)
-      setTelemetryStage(TelemetryStage.CLIENT_TX)
-      setTelemetryDuration(120)
-      
-      const engine = new TelemetryEngine(mode)
-      setTelemetryLog(engine.getTraceLog(120))
+  const runThinkingSimulation = async (isImage: boolean): Promise<void> => {
+    const mode = isImage ? TelemetryMode.IMAGE : TelemetryMode.TEXT
+    setTelemetryStage(TelemetryStage.CLIENT_TX)
 
-      const steps = isImage 
-        ? [
-            { stage: TelemetryStage.THINKPAD_GEMMA, dur: 850 },
-            { stage: TelemetryStage.MACBOOK_UPLOAD, dur: 2350 },
-            { stage: TelemetryStage.GEMINI_NEURAL, dur: 3820 },
-            { stage: TelemetryStage.RESPONSE_RX, dur: 4980 }
-          ]
-        : [
-            { stage: TelemetryStage.THINKPAD_GEMMA, dur: 850 },
-            { stage: TelemetryStage.RESPONSE_RX, dur: 2000 }
-          ]
+    const engine = new TelemetryEngine(mode)
+    setTelemetryLog(engine.getTraceLog(120))
 
-      for (const step of steps) {
-        await new Promise(r => setTimeout(r, 600))
-        setTelemetryStage(step.stage)
-        setTelemetryDuration(step.dur)
-        engine.currentStage = step.stage
-        setTelemetryLog(engine.getTraceLog(step.dur))
-      }
+    const steps = isImage
+      ? [
+          { stage: TelemetryStage.THINKPAD_GEMMA, dur: 850 },
+          { stage: TelemetryStage.MACBOOK_UPLOAD, dur: 2350 },
+          { stage: TelemetryStage.GEMINI_NEURAL, dur: 3820 },
+          { stage: TelemetryStage.RESPONSE_RX, dur: 4980 }
+        ]
+      : [
+          { stage: TelemetryStage.THINKPAD_GEMMA, dur: 850 },
+          { stage: TelemetryStage.RESPONSE_RX, dur: 2000 }
+        ]
 
-      resolve(true)
-    })
+    for (const step of steps) {
+      await new Promise(resolve => setTimeout(resolve, 600))
+      setTelemetryStage(step.stage)
+      engine.currentStage = step.stage
+      setTelemetryLog(engine.getTraceLog(step.dur))
+    }
   }
 
   // Send message action via real WebSocket direct link
@@ -204,11 +199,11 @@ export default function Home() {
     try {
       // 2. Direct Packet transmission to real ThinkPad socket
       wsManagerRef.current?.sendPacket(userMessage.text, savedStagedImage)
-    } catch (err: any) {
+    } catch (err: unknown) {
       const arcusMessage: Message = {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
-        text: `죄송합니다, 마스터. 씽크패드 기기 전송 중 오류가 발생했습니다: ${err.message}`,
+        text: `죄송합니다, 마스터. 씽크패드 기기 전송 중 오류가 발생했습니다: ${getErrorMessage(err)}`,
         time: timeString,
         memoryUpdates: []
       }
@@ -258,11 +253,11 @@ export default function Home() {
         }
         setMessages(prev => [...prev, arcusMessage])
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       const arcusMessage: Message = {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
-        text: `죄송합니다, 마스터. 맥북 스캔 서버 연결에 실패했습니다: ${err.message}`,
+        text: `죄송합니다, 마스터. 맥북 스캔 서버 연결에 실패했습니다: ${getErrorMessage(err)}`,
         time: timeString
       }
       setMessages(prev => [...prev, arcusMessage])

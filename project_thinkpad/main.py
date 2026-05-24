@@ -8,6 +8,7 @@ import httpx
 import json
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 
@@ -20,12 +21,29 @@ MACBOOK_URL = os.getenv("MAC_EYE_URL", "http://100.84.129.54:8000")  # 맥북 Fa
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOUL_FILE = os.path.join(os.path.dirname(BASE_DIR), "hermes_core", "soul.md")
 MEMORY_FILE = os.path.join(os.path.dirname(BASE_DIR), "hermes_core", "memory.md")
+DEFAULT_ALLOWED_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
+DEFAULT_ALLOWED_ORIGIN_REGEX = r"https://.*\.vercel\.app"
 
 # 로깅 설정
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # 글로벌 상태 관리 (단순화)
 PENDING_ACTION = {"type": None, "content": None}
+
+def get_allowed_origins() -> list[str]:
+    raw_origins = os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS)
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+def is_origin_allowed(origin: str | None) -> bool:
+    if not origin:
+        return True
+
+    allowed_origins = get_allowed_origins()
+    if "*" in allowed_origins or origin in allowed_origins:
+        return True
+
+    allowed_regex = os.getenv("ALLOWED_ORIGIN_REGEX", DEFAULT_ALLOWED_ORIGIN_REGEX)
+    return bool(allowed_regex and re.fullmatch(allowed_regex, origin))
 
 def parse_brain_response(raw_text: str) -> dict:
     """LLM 응답에서 마크다운 블록을 제거하고 안전하게 JSON 딕셔너리로 파싱합니다."""
@@ -283,6 +301,13 @@ async def lifespan(api_app: FastAPI):
     print("🛑 ARCUS ThinkPad Bridge 종료.")
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_allowed_origins(),
+    allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX", DEFAULT_ALLOWED_ORIGIN_REGEX),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
@@ -294,6 +319,12 @@ async def health():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    origin = websocket.headers.get("origin")
+    if not is_origin_allowed(origin):
+        logging.warning(f"WebSocket rejected due to disallowed origin: {origin}")
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     logging.info("WebSocket connected from client")
     

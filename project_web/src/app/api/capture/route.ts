@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 
-// MacBook actual endpoint URL
-const MACBOOK_URL = 'http://100.84.129.54:8000'
+const MACBOOK_URL = process.env.MACBOOK_URL ?? 'http://100.84.129.54:8000'
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Failed to connect to MacBook server'
+}
 
 export async function POST() {
   try {
@@ -32,10 +35,10 @@ export async function POST() {
       error: data.message || 'Capture failed'
     })
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json({
       success: false,
-      error: error.message || 'Failed to connect to MacBook server'
+      error: getErrorMessage(error)
     }, { status: 500 })
   }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import React from 'react'
 import { TelemetryView } from '../TelemetryView'
@@ -49,4 +49,3 @@ describe('TelemetryView Component (TDD Step 5: Responsive Cyberpunk View)', () =
     expect(screen.getByText('[NEURAL] DEEP MULTI-MODAL SYNTHESIS... 3820ms')).toBeDefined()
   })
 })
-

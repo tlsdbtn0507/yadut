@@ -8,7 +8,7 @@ export enum WebSocketStatus {
 export class WebSocketManager {
   private socket: WebSocket | null = null
   private _status: WebSocketStatus = WebSocketStatus.DISCONNECTED
-  private authTimeout: any = null
+  private authTimeout: ReturnType<typeof setTimeout> | null = null
   private token: string
   private onMessageReceived: ((message: string) => void) | null = null
 
@@ -63,7 +63,7 @@ export class WebSocketManager {
             }
             return
           }
-        } catch (e) {
+        } catch {
           // Fallback if payload is not strict JSON (raw string dialogues)
         }
 
@@ -85,7 +85,7 @@ export class WebSocketManager {
         this._status = WebSocketStatus.ERROR
       }
 
-    } catch (error) {
+    } catch {
       this._status = WebSocketStatus.ERROR
     }
   }

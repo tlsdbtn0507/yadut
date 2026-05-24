@@ -17,8 +17,11 @@ export interface ChatResult {
   memoryUpdates: string[]
 }
 
-const THINKPAD_IP = '100.122.25.31'
-const BASE_URL = `http://${THINKPAD_IP}:8000`
+const BASE_URL = process.env.NEXT_PUBLIC_THINKPAD_HTTP_URL ?? 'http://100.122.25.31:8000'
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Capture request failed'
+}
 
 export const apiHandler = {
   async captureScreen(): Promise<CaptureResult> {
@@ -30,10 +33,10 @@ export const apiHandler = {
         throw new Error('Capture failed')
       }
       return await response.json()
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        error: error.message || 'Capture request failed'
+        error: getErrorMessage(error)
       }
     }
   },
@@ -51,7 +54,7 @@ export const apiHandler = {
         throw new Error('Sync failed')
       }
       return await response.json()
-    } catch (error) {
+    } catch {
       // Arcus soul compliant fallback response
       return {
         success: false,
@@ -82,7 +85,7 @@ export const apiHandler = {
         text: parsed.text,
         memoryUpdates: parsed.memoryUpdates
       }
-    } catch (error) {
+    } catch {
       return {
         success: false,
         text: '죄송합니다, 마스터. 서버와의 대화 전송 중 오류가 발생했습니다.',

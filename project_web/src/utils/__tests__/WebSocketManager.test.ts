@@ -12,7 +12,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null
   onclose: ((event: { code: number }) => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
-  onerror: ((error: any) => void) | null = null
+  onerror: ((error: Event) => void) | null = null
 
   constructor(url: string) {
     this.url = url
@@ -59,7 +59,7 @@ describe('WebSocketManager (TDD Step 1: Core Security WebSocket)', () => {
     // Fast-forward connection microtask
     vi.advanceTimersByTime(0)
     
-    const socket = manager.getSocket() as any as MockWebSocket
+    const socket = manager.getSocket() as unknown as MockWebSocket
     expect(socket).toBeDefined()
     expect(socket.sentMessages.length).toBe(1)
     
@@ -74,7 +74,7 @@ describe('WebSocketManager (TDD Step 1: Core Security WebSocket)', () => {
     // Connection opened, sends auth packet
     vi.advanceTimersByTime(0)
     
-    const socket = manager.getSocket() as any as MockWebSocket
+    const socket = manager.getSocket() as unknown as MockWebSocket
     expect(manager.status).toBe(WebSocketStatus.CONNECTING) // still connecting (waiting for auth_success)
     
     // Fast-forward 3 seconds for timeout
@@ -88,7 +88,7 @@ describe('WebSocketManager (TDD Step 1: Core Security WebSocket)', () => {
     const manager = new WebSocketManager('ws://100.122.25.31:8000/ws', 'SECRET_KEY')
     
     vi.advanceTimersByTime(0)
-    const socket = manager.getSocket() as any as MockWebSocket
+    const socket = manager.getSocket() as unknown as MockWebSocket
     
     // Simulate server sending auth_success response
     socket.onmessage!({ data: JSON.stringify({ type: 'auth_success' }) })

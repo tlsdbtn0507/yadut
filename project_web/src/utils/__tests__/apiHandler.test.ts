@@ -16,7 +16,7 @@ describe('API Scenario Handler (TDD Step 4: Scenario Integration Mocks)', () => 
       ok: true,
       json: async () => ({ success: true, imageUrl: 'http://100.84.129.54:3000/screenshots/latest.png' })
     }
-    vi.mocked(fetch).mockResolvedValue(mockResponse as any)
+    vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response)
 
     const result = await apiHandler.captureScreen()
     
@@ -35,7 +35,7 @@ describe('API Scenario Handler (TDD Step 4: Scenario Integration Mocks)', () => 
         message: '마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!'
       })
     }
-    vi.mocked(fetch).mockResolvedValue(mockResponse as any)
+    vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response)
 
     const result = await apiHandler.syncCalendar('BASE64_IMAGE_DATA')
     
@@ -69,7 +69,7 @@ describe('API Scenario Handler (TDD Step 4: Scenario Integration Mocks)', () => 
         message: '마스터, 요청하신 분석을 시작합니다. [MEMORY_UPDATE: 마스터 관심사: 인공지능]'
       })
     }
-    vi.mocked(fetch).mockResolvedValue(mockResponse as any)
+    vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response)
 
     const result = await apiHandler.sendChatMessage('안녕')
     

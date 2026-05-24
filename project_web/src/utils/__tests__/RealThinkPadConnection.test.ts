@@ -9,7 +9,7 @@ describe('ThinkPad Bridge Real Connection Integration Test (TDD Real Node Connec
     // Connect a real raw WebSocket to the ThinkPad bridge
     const socket = new WebSocket(THINKPAD_WS_URL)
     
-    const handshakePromise = new Promise<{ success: boolean; data?: any }>((resolve, reject) => {
+    const handshakePromise = new Promise<{ success: boolean; data?: { type?: string } }>((resolve, reject) => {
       const timeout = setTimeout(() => {
         socket.close()
         reject(new Error('Handshake timeout: Real ThinkPad did not respond with auth_success within 3.5 seconds.'))
@@ -26,13 +26,13 @@ describe('ThinkPad Bridge Real Connection Integration Test (TDD Real Node Connec
 
       socket.onmessage = (event) => {
         try {
-          const payload = JSON.parse(event.data)
+          const payload = JSON.parse(event.data) as { type?: string }
           if (payload.type === 'auth_success') {
             clearTimeout(timeout)
             socket.close()
             resolve({ success: true, data: payload })
           }
-        } catch (e) {
+        } catch {
           // Ignore parse errors for non-auth messages
         }
       }
@@ -46,6 +46,6 @@ describe('ThinkPad Bridge Real Connection Integration Test (TDD Real Node Connec
     // Expect the real physical handshake to resolve successfully
     const result = await handshakePromise
     expect(result.success).toBe(true)
-    expect(result.data.type).toBe('auth_success')
+    expect(result.data?.type).toBe('auth_success')
   }, 10000) // Give 10 seconds timeout for real network tailscale path
 })
