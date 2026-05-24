@@ -566,25 +566,31 @@ struct MainConsoleView: View {
                         
                         Spacer()
                         
-                        // Five-Dot Stage Progress Lights
+                        // Dynamic Stage Progress Lights
                         HStack(spacing: 3) {
-                            ForEach(0..<5) { idx in
+                            let dotCount = viewModel.isImagePipeline ? 5 : 3
+                            ForEach(0..<dotCount) { idx in
+                                let actualRawValue = (!viewModel.isImagePipeline && idx == 2) ? 4 : idx
                                 Circle()
-                                    .fill(viewModel.processStage.rawValue == idx ? viewModel.processStage.color : Color.white.opacity(0.15))
+                                    .fill(viewModel.processStage.rawValue == actualRawValue ? viewModel.processStage.color : Color.white.opacity(0.15))
                                     .frame(width: 4, height: 4)
-                                    .scaleEffect(viewModel.processStage.rawValue == idx ? 1.25 : 1.0)
+                                    .scaleEffect(viewModel.processStage.rawValue == actualRawValue ? 1.25 : 1.0)
                             }
                         }
                     }
                     .frame(width: 250)
                     
-                    // 1. Horizontal Node Visualizer Chain
+                    // 1. Horizontal Node Visualizer Chain (Dynamic 3-Node/5-Node scaling)
                     HStack(spacing: 0) {
-                        let nodeLabels = ["iOS", "THK", "MAC", "GEM", "ARC"]
-                        ForEach(0..<5) { idx in
+                        let nodeLabels = viewModel.isImagePipeline ? ["iOS", "THK", "MAC", "GEM", "ARC"] : ["iOS", "THK", "ARC"]
+                        let nodeCount = nodeLabels.count
+                        
+                        ForEach(0..<nodeCount) { idx in
                             let label = nodeLabels[idx]
-                            let isCompleted = viewModel.processStage.rawValue >= idx
-                            let isActive = viewModel.processStage.rawValue == idx
+                            let actualRawValue = (!viewModel.isImagePipeline && idx == 2) ? 4 : idx
+                            
+                            let isCompleted = viewModel.processStage.rawValue >= actualRawValue
+                            let isActive = viewModel.processStage.rawValue == actualRawValue
                             let nodeColor = isActive ? viewModel.processStage.color : (isCompleted ? Color.cyan.opacity(0.7) : Color.white.opacity(0.12))
                             
                             Text(label)
@@ -602,14 +608,16 @@ struct MainConsoleView: View {
                                 .shadow(color: nodeColor.opacity(isActive ? 0.6 : 0), radius: 4)
                                 .scaleEffect(isActive ? 1.15 : 1.0)
                             
-                            if idx < 4 {
-                                let lineActive = viewModel.processStage.rawValue > idx
+                            if idx < nodeCount - 1 {
+                                let nextNodeRawValue = (!viewModel.isImagePipeline && idx == 1) ? 4 : idx + 1
+                                let lineActive = viewModel.processStage.rawValue >= nextNodeRawValue
                                 let lineColor = lineActive ? Color.cyan.opacity(0.7) : Color.white.opacity(0.12)
+                                let lineWidth = viewModel.isImagePipeline ? CGFloat(22) : CGFloat(56)
                                 
                                 Rectangle()
                                     .fill(lineColor)
                                     .frame(height: 1.0)
-                                    .frame(width: 22)
+                                    .frame(width: lineWidth)
                             }
                         }
                     }
@@ -700,13 +708,13 @@ struct MainConsoleView: View {
             logs.append("1.20s [BRIDGE] REASONING MESSAGE INTENT...")
         }
         
-        if stage.rawValue >= 2 {
+        if viewModel.isImagePipeline && stage.rawValue >= 2 {
             logs.append("1.82s [BRIDGE] INTENT ANALYSIS COMPLETED.")
             logs.append("2.05s [CORE] INITIATING FILE UPLOAD TO MACBOOK...")
             logs.append("2.35s [CORE] UPLOADING ATTACHMENT TO STORAGE... OK")
         }
         
-        if stage.rawValue >= 3 {
+        if viewModel.isImagePipeline && stage.rawValue >= 3 {
             logs.append("2.72s [NEURAL] ENGAGING GEMINI SYNAPSE ENGINE...")
             logs.append("3.15s [NEURAL] ANALYZING COGNITIVE DATA...")
             logs.append("3.82s [NEURAL] DEEP MULTI-MODAL SYNTHESIS...")

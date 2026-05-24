@@ -62,6 +62,7 @@ class MainConsoleViewModel: ObservableObject {
     @Published var audioLevel: CGFloat = 0.0
     @Published var isArcusThinking = false
     @Published var processStage: ArcusProcessStage = .clientTx
+    @Published var isImagePipeline = false
     @Published var selectedAttachment: SelectedAttachment? = nil
     
     private let webSocketManager: WebSocketManagerProtocol
@@ -128,9 +129,10 @@ class MainConsoleViewModel: ObservableObject {
         }
     }
     
-    /// 아르커스 신호 분석 단계를 시뮬레이션하여 유저에게 가시화합니다. (고밀도 유동 지연 적용)
-    private func startThinkingSimulation() {
+    /// 아르커스 신호 분석 단계를 시뮬레이션하여 유저에게 가시화합니다. (고밀도 유동 지연 및 이원화 적용)
+    private func startThinkingSimulation(hasAttachment: Bool) {
         isArcusThinking = true
+        isImagePipeline = hasAttachment
         processStage = .clientTx
         
         stageTimer?.cancel()
@@ -142,7 +144,13 @@ class MainConsoleViewModel: ObservableObject {
         func runNextStage() {
             guard isArcusThinking else { return }
             if currentStageIndex < ArcusProcessStage.allCases.count - 1 {
-                currentStageIndex += 1
+                if !hasAttachment && currentStageIndex == 1 {
+                    // 이미지 분석이 필요 없는 경우 2, 3단계를 생략하고 곧바로 4단계(다운링크)로 점프
+                    currentStageIndex = 4
+                } else {
+                    currentStageIndex += 1
+                }
+                
                 if let nextStage = ArcusProcessStage(rawValue: currentStageIndex) {
                     withAnimation(.easeInOut(duration: 0.35)) {
                         self.processStage = nextStage
@@ -185,7 +193,7 @@ class MainConsoleViewModel: ObservableObject {
     func stopListening() {
         withAnimation(.spring()) {
             isListening = false
-            startThinkingSimulation()
+            startThinkingSimulation(hasAttachment: false)
             updateHUD(with: connectionStatus)
         }
         // TODO: 오디오 데이터 수집 후 webSocketManager.send(audioData:) 호출
@@ -197,10 +205,12 @@ class MainConsoleViewModel: ObservableObject {
         let userMsg = ChatMessage(text: inputText, isUser: true, attachment: selectedAttachment)
         messages.append(userMsg)
         
+        let hasImg = selectedAttachment?.type == .image
+        
         // 서버에 텍스트 및 첨부 파일 전송
         webSocketManager.send(text: inputText, attachment: selectedAttachment)
         
-        startThinkingSimulation()
+        startThinkingSimulation(hasAttachment: hasImg)
         updateHUD(with: connectionStatus)
         inputText = ""
         selectedAttachment = nil
