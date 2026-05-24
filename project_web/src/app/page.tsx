@@ -16,11 +16,21 @@ interface Message {
   memoryUpdates?: string[]
 }
 
-const THINKPAD_WS_URL = process.env.NEXT_PUBLIC_THINKPAD_WS_URL ?? 'ws://100.122.25.31:8000/ws'
-const SECURE_TOKEN = process.env.NEXT_PUBLIC_WS_TOKEN ?? 'SECRET_KEY'
+interface RuntimeConfig {
+  thinkpadWsUrl: string
+  wsToken: string
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error'
+}
+
+async function loadRuntimeConfig(): Promise<RuntimeConfig> {
+  const response = await fetch('/api/runtime-config', { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error('Runtime config request failed')
+  }
+  return response.json() as Promise<RuntimeConfig>
 }
 
 export default function Home() {
@@ -53,39 +63,58 @@ export default function Home() {
 
   // 1. Establish Real-time Secure WebSocket Hardware Connection on mount
   useEffect(() => {
-    console.log('Connecting real socket to ThinkPad...')
-    const manager = new WebSocketManager(THINKPAD_WS_URL, SECURE_TOKEN)
-    wsManagerRef.current = manager
+    let statusInterval: ReturnType<typeof setInterval> | null = null
+    let isMounted = true
 
-    // Track status dynamically
-    const statusInterval = setInterval(() => {
-      setWsStatus(manager.status)
-    }, 500)
+    const connect = async () => {
+      try {
+        const config = await loadRuntimeConfig()
+        if (!isMounted) return
 
-    // Handle real-time Arcus responses incoming from real WebSocket
-    manager.setOnMessage((rawMessage: string) => {
-      console.log('Real response received:', rawMessage)
-      const now = new Date()
-      const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+        console.log('Connecting real socket to ThinkPad...')
+        const manager = new WebSocketManager(config.thinkpadWsUrl, config.wsToken)
+        wsManagerRef.current = manager
 
-      // Integrate Memory Parser implemented in Stage 2
-      const parsed = parseMemory(rawMessage)
+        // Track status dynamically
+        statusInterval = setInterval(() => {
+          setWsStatus(manager.status)
+        }, 500)
 
-      const arcusMessage: Message = {
-        id: `arcus-${Date.now()}`,
-        sender: 'arcus',
-        text: parsed.text,
-        time: timeString,
-        memoryUpdates: parsed.memoryUpdates
+        // Handle real-time Arcus responses incoming from real WebSocket
+        manager.setOnMessage((rawMessage: string) => {
+          console.log('Real response received:', rawMessage)
+          const now = new Date()
+          const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+          // Integrate Memory Parser implemented in Stage 2
+          const parsed = parseMemory(rawMessage)
+
+          const arcusMessage: Message = {
+            id: `arcus-${Date.now()}`,
+            sender: 'arcus',
+            text: parsed.text,
+            time: timeString,
+            memoryUpdates: parsed.memoryUpdates
+          }
+
+          setMessages(prev => [...prev, arcusMessage])
+          setIsThinking(false)
+        })
+      } catch (error) {
+        console.error('Runtime config load failed:', error)
+        setWsStatus(WebSocketStatus.ERROR)
       }
+    }
 
-      setMessages(prev => [...prev, arcusMessage])
-      setIsThinking(false)
-    })
+    connect()
 
     return () => {
-      clearInterval(statusInterval)
-      manager.disconnect()
+      isMounted = false
+      if (statusInterval) {
+        clearInterval(statusInterval)
+      }
+      wsManagerRef.current?.disconnect()
+      wsManagerRef.current = null
     }
   }, [])
 
