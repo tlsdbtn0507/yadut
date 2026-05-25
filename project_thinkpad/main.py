@@ -47,30 +47,16 @@ def is_origin_allowed(origin: str | None) -> bool:
     allowed_regex = os.getenv("ALLOWED_ORIGIN_REGEX", DEFAULT_ALLOWED_ORIGIN_REGEX)
     return bool(allowed_regex and re.fullmatch(allowed_regex, origin))
 
-def get_current_datetime_reply(user_text: str, now: datetime | None = None) -> str | None:
-    normalized = re.sub(r"\s+", "", user_text.lower())
-    if not normalized:
-        return None
-
-    capture_terms = ("화면", "캡처", "스크린샷", "스캔", "보고")
-    if any(term in normalized for term in capture_terms):
-        return None
-
-    date_terms = ("날짜", "몇월", "몇일", "며칠", "요일")
-    time_terms = ("몇시", "현재시각", "지금시각", "현재시간", "지금시간")
-    has_date_query = any(term in normalized for term in date_terms)
-    has_time_query = any(term in normalized for term in time_terms)
-    if not has_date_query and not has_time_query:
-        return None
-
+def get_current_context(now: datetime | None = None) -> str:
     current = now or datetime.now(ZoneInfo("Asia/Seoul"))
     weekdays = ("월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일")
-    date_text = f"{current.year}년 {current.month}월 {current.day}일 {weekdays[current.weekday()]}"
+    return (
+        f"현재 한국 시간(KST): {current.year}년 {current.month}월 {current.day}일 "
+        f"{weekdays[current.weekday()]} {current.hour}시 {current.minute:02d}분"
+    )
 
-    if has_time_query:
-        return f"마스터님, 현재 한국 시간은 {date_text} {current.hour}시 {current.minute:02d}분입니다."
-
-    return f"마스터님, 오늘은 {date_text}입니다."
+def build_brain_prompt(soul_context: str, user_text: str, now: datetime | None = None) -> str:
+    return f"{soul_context}\n\n[현재 컨텍스트]\n{get_current_context(now)}\n\nUser: {user_text}\nDecision:"
 
 def parse_brain_response(raw_text: str) -> dict:
     """LLM 응답에서 마크다운 블록을 제거하고 안전하게 JSON 딕셔너리로 파싱합니다."""
@@ -94,7 +80,7 @@ async def ask_gemma_brain(user_text):
             with open(SOUL_FILE, "r", encoding="utf-8") as f:
                 soul_context = f.read()
             
-            prompt = f"{soul_context}\n\nUser: {user_text}\nDecision:"
+            prompt = build_brain_prompt(soul_context, user_text)
             
             brain_url = os.getenv("BRAIN_URL", "http://100.84.129.54:1234/v1")
             response = await client.post(
@@ -257,11 +243,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚙️ 시스템 업데이트 완료. 아르커스의 자아가 갱신되었습니다.")
         
         PENDING_ACTION = {"type": None, "content": None}
-        return
-
-    datetime_reply = get_current_datetime_reply(user_text)
-    if datetime_reply:
-        await update.message.reply_text(datetime_reply)
         return
 
     # 2. 의도 분석 시작
@@ -453,13 +434,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     logging.error(f"WS Image Sync Error: {e}")
                     response_message = f"❌ 시스템 에러: {str(e)}"
             else:
-                datetime_reply = get_current_datetime_reply(text)
-                if datetime_reply:
-                    response_message = datetime_reply
-                else:
-                    # 기존 일반 텍스트 브레인 엔진 분석 요청 (JSON 데이터 전체가 아닌 추출된 text 필드만 전달)
-                    decision = await ask_gemma_brain(text)
-                    response_message = decision.get("message", "")
+                # 기존 일반 텍스트 브레인 엔진 분석 요청 (JSON 데이터 전체가 아닌 추출된 text 필드만 전달)
+                decision = await ask_gemma_brain(text)
+                response_message = decision.get("message", "")
             
             await websocket.send_text(response_message)
             logging.info(f"Sent to WS: {response_message}")

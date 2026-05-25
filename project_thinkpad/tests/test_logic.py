@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
-from main import get_current_datetime_reply, parse_brain_response, handle_message, websocket_endpoint
+from main import build_brain_prompt, parse_brain_response, handle_message, websocket_endpoint
 
 # 1. parse_brain_response 테스트 (단순 함수)
 def test_parse_brain_response_normal():
@@ -22,14 +22,12 @@ def test_parse_brain_response_garbage():
     assert result["action"] == "NONE"
     assert "에러" in result["message"]
 
-def test_get_current_datetime_reply_handles_kst_date_query():
+def test_build_brain_prompt_includes_kst_context():
     now = datetime(2026, 5, 25, 18, 30, tzinfo=ZoneInfo("Asia/Seoul"))
-    result = get_current_datetime_reply("오늘이 몇월이야?", now)
-    assert result == "마스터님, 오늘은 2026년 5월 25일 월요일입니다."
-
-def test_get_current_datetime_reply_ignores_capture_query():
-    result = get_current_datetime_reply("지금 화면 좀 봐줘")
-    assert result is None
+    result = build_brain_prompt("SOUL", "오늘 무슨날이야?", now)
+    assert "[현재 컨텍스트]" in result
+    assert "현재 한국 시간(KST): 2026년 5월 25일 월요일 18시 30분" in result
+    assert "User: 오늘 무슨날이야?" in result
 
 # 2. handle_message 라우팅 테스트 (Async)
 @pytest.mark.asyncio
@@ -50,41 +48,6 @@ async def test_handle_message_routing_none(mock_capture, mock_ask):
     mock_capture.assert_not_called()
     # 검증: 유저에게 응답 메시지가 전달되어야 함
     update.message.reply_text.assert_called_with("위로의 말")
-
-@pytest.mark.asyncio
-@patch("main.ask_gemma_brain")
-async def test_handle_message_datetime_query_bypasses_llm(mock_ask):
-    update = AsyncMock()
-    update.message.text = "오늘이 몇월이야?"
-    context = MagicMock()
-
-    await handle_message(update, context)
-
-    mock_ask.assert_not_called()
-    update.message.reply_text.assert_called_once()
-    assert "오늘은" in update.message.reply_text.call_args.args[0]
-
-@pytest.mark.asyncio
-@patch.dict("os.environ", {"WS_TOKEN": "SECRET_KEY"})
-@patch("main.ask_gemma_brain")
-async def test_websocket_datetime_query_bypasses_llm(mock_ask):
-    websocket = AsyncMock()
-    websocket.headers = {"origin": "https://projectweb-beta-gilt.vercel.app"}
-
-    from fastapi import WebSocketDisconnect
-    payload = {"text": "오늘이 몇월이야?", "attachment_type": None, "attachment_data": None}
-    websocket.receive_text = AsyncMock(side_effect=[
-        json.dumps({"type": "auth", "token": "SECRET_KEY"}),
-        json.dumps(payload),
-        WebSocketDisconnect()
-    ])
-
-    await websocket_endpoint(websocket)
-
-    mock_ask.assert_not_called()
-    websocket.send_text.assert_any_call(json.dumps({"type": "auth_success"}))
-    sent_messages = [call.args[0] for call in websocket.send_text.call_args_list]
-    assert any("오늘은" in message for message in sent_messages)
 
 @pytest.mark.asyncio
 @patch("main.ask_gemma_brain")
