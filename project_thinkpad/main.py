@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 import httpx
 import json
+import html
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,6 +58,163 @@ def get_current_context(now: datetime | None = None) -> str:
 
 def build_brain_prompt(soul_context: str, user_text: str, now: datetime | None = None) -> str:
     return f"{soul_context}\n\n[현재 컨텍스트]\n{get_current_context(now)}\n\nUser: {user_text}\nDecision:"
+
+def clean_search_text(value: str) -> str:
+    return html.unescape(re.sub(r"\s+", " ", re.sub(r"<.*?>", "", value))).strip()
+
+def normalize_search_result(provider: str, title: str, url: str, snippet: str) -> dict:
+    return {
+        "provider": provider,
+        "title": clean_search_text(title),
+        "url": clean_search_text(url),
+        "snippet": clean_search_text(snippet),
+    }
+
+def format_search_results(results: list[dict]) -> str:
+    if not results:
+        return "검색 결과 없음"
+
+    lines = []
+    for index, item in enumerate(results, start=1):
+        lines.append(
+            "\n".join(
+                [
+                    f"{index}. {item.get('title', '')}",
+                    f"URL: {item.get('url', '')}",
+                    f"요약: {item.get('snippet', '')}",
+                ]
+            )
+        )
+    return "\n\n".join(lines)
+
+async def search_brave(query: str) -> list[dict]:
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+    if not api_key:
+        raise RuntimeError("BRAVE_SEARCH_API_KEY is not configured")
+
+    params = {
+        "q": query,
+        "count": 5,
+        "country": "KR",
+        "search_lang": "ko",
+        "ui_lang": "ko-KR",
+        "safesearch": "moderate",
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params=params,
+            headers={
+                "Accept": "application/json",
+                "X-Subscription-Token": api_key,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    return [
+        normalize_search_result(
+            "BRAVE",
+            item.get("title", ""),
+            item.get("url", ""),
+            item.get("description", ""),
+        )
+        for item in data.get("web", {}).get("results", [])
+    ]
+
+async def search_duckduckgo(query: str) -> list[dict]:
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 ARCUS"}) as client:
+        response = await client.get("https://html.duckduckgo.com/html/", params={"q": query, "kl": "kr-ko"})
+        response.raise_for_status()
+        body = response.text
+
+    blocks = re.findall(r'<div class="result(?: results_links_deep)?".*?</div>\s*</div>', body, re.S)
+    results = []
+    for block in blocks[:5]:
+        title_match = re.search(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, re.S)
+        snippet_match = re.search(r'class="result__snippet"[^>]*>(.*?)</a>', block, re.S)
+        if not title_match:
+            continue
+        results.append(
+            normalize_search_result(
+                "DUCKDUCKGO_FALLBACK",
+                title_match.group(2),
+                title_match.group(1),
+                snippet_match.group(1) if snippet_match else "",
+            )
+        )
+    return results
+
+async def search_web(query: str) -> list[dict]:
+    if not query.strip():
+        return []
+
+    try:
+        brave_results = await search_brave(query)
+        if brave_results:
+            return brave_results
+    except Exception as error:
+        logging.warning(f"Brave search failed: {error}")
+
+    try:
+        return await search_duckduckgo(query)
+    except Exception as error:
+        logging.warning(f"DuckDuckGo fallback failed: {error}")
+        return []
+
+async def ask_gemma_with_search_context(original_question: str, query: str, results: list[dict]) -> str:
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            with open(SOUL_FILE, "r", encoding="utf-8") as f:
+                soul_context = f.read()
+
+            prompt = (
+                f"{soul_context}\n\n"
+                f"[현재 컨텍스트]\n{get_current_context()}\n\n"
+                "[검색 결과]\n"
+                f"검색어: {query}\n"
+                f"{format_search_results(results)}\n\n"
+                "위 검색 결과만 근거로 마스터의 질문에 답하십시오. "
+                "검색 결과가 부족하거나 서로 충돌하면 그 한계를 분명히 말하십시오. "
+                "중요한 주장에는 출처 URL을 함께 언급하십시오.\n\n"
+                f"User: {original_question}\nFinal:"
+            )
+
+            brain_url = os.getenv("BRAIN_URL", "http://100.84.129.54:1234/v1")
+            response = await client.post(
+                f"{brain_url}/chat/completions",
+                json={
+                    "model": os.getenv("MODEL_NAME", "gemma-4-e4b-it"),
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.4,
+                    "stream": False,
+                },
+            )
+            data = response.json()
+            raw_content = data["choices"][0]["message"]["content"]
+            parsed = parse_brain_response(raw_content)
+            if parsed.get("message"):
+                return parsed["message"]
+            return raw_content.strip()
+        except Exception as error:
+            logging.error(f"Search summary error: {error}")
+            if not results:
+                return "죄송합니다, 마스터. 검색 결과를 가져오지 못했습니다."
+            return f"마스터님, 검색은 완료했지만 최종 요약 중 오류가 발생했습니다.\n\n{format_search_results(results)}"
+
+async def handle_brain_decision(decision: dict, user_text: str) -> str:
+    action = decision.get("action", "NONE")
+    message = decision.get("message", "")
+
+    if action == "WEB_SEARCH":
+        query = str(decision.get("query") or user_text).strip()
+        results = await search_web(query)
+        return await ask_gemma_with_search_context(user_text, query, results)
+
+    if action == "CLARIFY":
+        return message or "마스터님, 요청을 조금 더 구체적으로 말씀해 주시겠습니까?"
+
+    return message
 
 def parse_brain_response(raw_text: str) -> dict:
     """LLM 응답에서 마크다운 블록을 제거하고 안전하게 JSON 딕셔너리로 파싱합니다."""
@@ -261,6 +419,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "CAPTURE":
         await execute_capture_skill(update, context)
 
+    # [분기 2: 웹 검색]
+    elif action == "WEB_SEARCH" or action == "CLARIFY":
+        await update.message.reply_text(await handle_brain_decision(decision, user_text))
+
     # [분기 2: 설정 및 취향 수정 요청]
     elif action == "UPDATE_PREFERENCE" or action == "UPDATE_SOUL":
         async def apply_preference(update, context, new_pref):
@@ -436,7 +598,7 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 # 기존 일반 텍스트 브레인 엔진 분석 요청 (JSON 데이터 전체가 아닌 추출된 text 필드만 전달)
                 decision = await ask_gemma_brain(text)
-                response_message = decision.get("message", "")
+                response_message = await handle_brain_decision(decision, text)
             
             await websocket.send_text(response_message)
             logging.info(f"Sent to WS: {response_message}")

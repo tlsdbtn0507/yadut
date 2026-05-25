@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
-from main import build_brain_prompt, parse_brain_response, handle_message, websocket_endpoint
+from main import build_brain_prompt, handle_brain_decision, parse_brain_response, handle_message, websocket_endpoint
 
 # 1. parse_brain_response 테스트 (단순 함수)
 def test_parse_brain_response_normal():
@@ -61,6 +61,44 @@ async def test_handle_message_routing_capture(mock_capture, mock_ask):
     context = MagicMock()
     
     await handle_message(update, context)
+
+@pytest.mark.asyncio
+@patch("main.ask_gemma_with_search_context")
+@patch("main.search_web")
+async def test_handle_brain_decision_web_search(mock_search, mock_summary):
+    mock_search.return_value = [
+        {
+            "provider": "BRAVE",
+            "title": "서울 날씨",
+            "url": "https://example.com/weather",
+            "snippet": "서울의 현재 날씨 정보",
+        }
+    ]
+    mock_summary.return_value = "마스터님, 서울 날씨 검색 결과입니다."
+
+    result = await handle_brain_decision(
+        {"message": "검색하겠습니다.", "action": "WEB_SEARCH", "query": "서울 오늘 날씨"},
+        "오늘 서울 날씨 알려줘",
+    )
+
+    mock_search.assert_awaited_once_with("서울 오늘 날씨")
+    mock_summary.assert_awaited_once()
+    assert result == "마스터님, 서울 날씨 검색 결과입니다."
+
+@pytest.mark.asyncio
+@patch("main.ask_gemma_with_search_context")
+@patch("main.search_web")
+async def test_handle_brain_decision_web_search_uses_user_text_when_query_missing(mock_search, mock_summary):
+    mock_search.return_value = []
+    mock_summary.return_value = "검색 결과가 부족합니다."
+
+    result = await handle_brain_decision(
+        {"message": "검색하겠습니다.", "action": "WEB_SEARCH"},
+        "현재 대한민국에서 가장 뜨거운 뉴스가 뭐야?",
+    )
+
+    mock_search.assert_awaited_once_with("현재 대한민국에서 가장 뜨거운 뉴스가 뭐야?")
+    assert result == "검색 결과가 부족합니다."
     
 @pytest.mark.asyncio
 @patch("main.classify_image_intent")
