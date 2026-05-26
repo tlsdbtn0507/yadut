@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { TelemetryMode, TelemetryStage, TelemetryEngine } from '../utils/telemetry'
 import { parseMemory } from '../utils/parseMemory'
 import { WebSocketManager, WebSocketStatus } from '../utils/WebSocketManager'
+import { shouldSubmitChatKey } from '../utils/chatKeyboard'
 import styles from './page.module.css'
 
 interface Message {
@@ -296,7 +297,14 @@ export default function Home() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (
+      shouldSubmitChatKey({
+        key: e.key,
+        shiftKey: e.shiftKey,
+        isComposing: e.nativeEvent.isComposing,
+        keyCode: e.keyCode,
+      })
+    ) {
       e.preventDefault()
       handleSend()
     }
