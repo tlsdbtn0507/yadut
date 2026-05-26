@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 
+import { requireAllowedUser } from '@/auth/requireAllowedUser'
+import { getAuthFailure } from '@/auth/routeProtection'
+
 const MACBOOK_URL = process.env.MACBOOK_URL ?? 'http://100.84.129.54:8000'
 
 function getErrorMessage(error: unknown): string {
@@ -7,6 +10,12 @@ function getErrorMessage(error: unknown): string {
 }
 
 export async function POST() {
+  const authFailure = getAuthFailure(await requireAllowedUser())
+
+  if (authFailure) {
+    return NextResponse.json(authFailure.body, { status: authFailure.status })
+  }
+
   try {
     // 1. Direct GET request to physical MacBook server (completely bypassing browser CORS check)
     const response = await fetch(`${MACBOOK_URL}/capture`, {

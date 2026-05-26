@@ -1,0 +1,86 @@
+import { NextResponse } from 'next/server'
+
+import { requireAllowedUser } from '@/auth/requireAllowedUser'
+import { getAuthFailure } from '@/auth/routeProtection'
+
+type ArcusMessagePayload = {
+  text?: string
+  attachment_type?: string | null
+  attachment_data?: string | null
+  attachment_name?: string
+  message_id?: string
+}
+
+function getThinkPadEndpoint(): string {
+  const baseUrl = process.env.THINKPAD_FUNNEL_URL
+
+  if (!baseUrl) {
+    throw new Error('THINKPAD_FUNNEL_URL is not configured')
+  }
+
+  return `${baseUrl.replace(/\/$/, '')}/api/arcus/message`
+}
+
+function getBridgeToken(): string {
+  const token = process.env.THINKPAD_BRIDGE_TOKEN
+
+  if (!token) {
+    throw new Error('THINKPAD_BRIDGE_TOKEN is not configured')
+  }
+
+  return token
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Failed to connect to ThinkPad bridge'
+}
+
+export async function POST(request: Request) {
+  const authFailure = getAuthFailure(await requireAllowedUser())
+
+  if (authFailure) {
+    return NextResponse.json(authFailure.body, { status: authFailure.status })
+  }
+
+  try {
+    const payload = (await request.json()) as ArcusMessagePayload
+    const body = {
+      text: payload.text ?? '',
+      attachment_type: payload.attachment_type ?? null,
+      attachment_data: payload.attachment_data ?? null,
+      attachment_name: payload.attachment_name ?? 'upload.jpg',
+      message_id: payload.message_id ?? `web-${Date.now()}`,
+    }
+
+    const response = await fetch(getThinkPadEndpoint(), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${getBridgeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: data.detail ?? data.error ?? `ThinkPad returned ${response.status}`,
+        },
+        { status: response.status },
+      )
+    }
+
+    return NextResponse.json(data)
+  } catch (error: unknown) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: getErrorMessage(error),
+      },
+      { status: 500 },
+    )
+  }
+}

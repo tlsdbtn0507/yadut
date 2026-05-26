@@ -8,8 +8,9 @@ import httpx
 import json
 import html
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -32,6 +33,20 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # 글로벌 상태 관리 (단순화)
 PENDING_ACTION = {"type": None, "content": None}
+
+class ArcusMessageRequest(BaseModel):
+    text: str = ""
+    attachment_type: str | None = None
+    attachment_data: str | None = None
+    attachment_name: str = "upload.jpg"
+    message_id: str = "http"
+
+def is_bridge_authorized(authorization: str | None) -> bool:
+    expected_token = os.getenv("THINKPAD_BRIDGE_TOKEN")
+    if not expected_token or not authorization:
+        return False
+
+    return authorization == f"Bearer {expected_token}"
 
 def get_allowed_origins() -> list[str]:
     raw_origins = os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS)
@@ -215,6 +230,63 @@ async def handle_brain_decision(decision: dict, user_text: str) -> str:
         return message or "마스터님, 요청을 조금 더 구체적으로 말씀해 주시겠습니까?"
 
     return message
+
+async def process_arcus_message(
+    text: str = "",
+    attachment_type: str | None = None,
+    attachment_data: str | None = None,
+    attachment_name: str = "upload.jpg",
+    message_id: str = "http",
+) -> str:
+    if attachment_type == "image" and attachment_data:
+        intent = await classify_image_intent(text, attachment_data)
+        logging.info(f"Image intent classified as: {intent}")
+
+        import base64
+        try:
+            image_bytes = base64.b64decode(attachment_data)
+            temp_filename = f"schedule_{message_id}.jpg"
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
+                upload_res = await client.post(f"{MACBOOK_URL}/upload", files=files)
+                upload_res.raise_for_status()
+                upload_data = upload_res.json()
+
+                if upload_data.get("status") != "success":
+                    return "❌ 업로드 실패: 마스터, 이미지 업로드에 실패했습니다. 다시 전송해 주시겠습니까?"
+
+                uploaded_filename = upload_data.get("filename")
+
+                if intent == "SCHEDULE_SYNC":
+                    logging.info(f"Starting schedule sync for {uploaded_filename}...")
+                    sync_res = await client.get(f"{MACBOOK_URL}/sync_calendar/{uploaded_filename}")
+                    sync_res.raise_for_status()
+                    sync_result = sync_res.json()
+
+                    if sync_result.get("status") == "success":
+                        return sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
+                    return f"❌ 동기화 실패: {sync_result.get('message')}"
+
+                logging.info(f"Starting multimodal image chat for {uploaded_filename}...")
+                chat_files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
+                chat_res = await client.post(
+                    f"{MACBOOK_URL}/chat_with_image",
+                    params={"prompt": text},
+                    files=chat_files
+                )
+                chat_res.raise_for_status()
+                chat_result = chat_res.json()
+
+                if chat_result.get("status") == "success":
+                    return chat_result.get("message")
+                return f"❌ 분석 실패: {chat_result.get('message')}"
+        except Exception as e:
+            logging.error(f"Arcus image processing error: {e}")
+            return f"❌ 시스템 에러: {str(e)}"
+
+    decision = await ask_gemma_brain(text)
+    return await handle_brain_decision(decision, text)
 
 def parse_brain_response(raw_text: str) -> dict:
     """LLM 응답에서 마크다운 블록을 제거하고 안전하게 JSON 딕셔너리로 파싱합니다."""
@@ -492,6 +564,23 @@ async def root():
 async def health():
     return {"status": "ok"}
 
+@app.post("/api/arcus/message")
+async def arcus_message_endpoint(
+    payload: ArcusMessageRequest,
+    authorization: str | None = Header(default=None),
+):
+    if not is_bridge_authorized(authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    message = await process_arcus_message(
+        text=payload.text,
+        attachment_type=payload.attachment_type,
+        attachment_data=payload.attachment_data,
+        attachment_name=payload.attachment_name,
+        message_id=payload.message_id,
+    )
+    return {"success": True, "message": message}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     origin = websocket.headers.get("origin")
@@ -542,63 +631,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 attachment_type = None
                 attachment_data = None
             
-            if attachment_type == "image" and attachment_data:
-                # 1. 의도 분류 실행 (Gemma 4 비전 모델 분석)
-                intent = await classify_image_intent(text, attachment_data)
-                logging.info(f"Image intent classified as: {intent}")
-                
-                # 2. Base64 이미지 디코딩
-                import base64
-                try:
-                    image_bytes = base64.b64decode(attachment_data)
-                    temp_filename = f"schedule_{message_id}.jpg"
-                    
-                    async with httpx.AsyncClient(timeout=120.0) as client:
-                        # 3. 맥북 서버로 이미지 업로드 (Multipart form-data)
-                        files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
-                        upload_res = await client.post(f"{MACBOOK_URL}/upload", files=files)
-                        upload_res.raise_for_status()
-                        upload_data = upload_res.json()
-                        
-                        if upload_data.get("status") == "success":
-                            uploaded_filename = upload_data.get("filename")
-                            
-                            if intent == "SCHEDULE_SYNC":
-                                # [시간표 등록 분기]
-                                logging.info(f"Starting schedule sync for {uploaded_filename}...")
-                                sync_res = await client.get(f"{MACBOOK_URL}/sync_calendar/{uploaded_filename}")
-                                sync_res.raise_for_status()
-                                sync_result = sync_res.json()
-                                
-                                if sync_result.get("status") == "success":
-                                    response_message = sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
-                                else:
-                                    response_message = f"❌ 동기화 실패: {sync_result.get('message')}"
-                            else:
-                                # [일반 사진 대화 분기 - chat_with_image API 호출]
-                                logging.info(f"Starting multimodal image chat for {uploaded_filename}...")
-                                chat_files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
-                                chat_res = await client.post(
-                                    f"{MACBOOK_URL}/chat_with_image",
-                                    params={"prompt": text},
-                                    files=chat_files
-                                )
-                                chat_res.raise_for_status()
-                                chat_result = chat_res.json()
-                                
-                                if chat_result.get("status") == "success":
-                                    response_message = chat_result.get("message")
-                                else:
-                                    response_message = f"❌ 분석 실패: {chat_result.get('message')}"
-                        else:
-                            response_message = "❌ 업로드 실패: 마스터, 이미지 업로드에 실패했습니다. 다시 전송해 주시겠습니까?"
-                except Exception as e:
-                    logging.error(f"WS Image Sync Error: {e}")
-                    response_message = f"❌ 시스템 에러: {str(e)}"
-            else:
-                # 기존 일반 텍스트 브레인 엔진 분석 요청 (JSON 데이터 전체가 아닌 추출된 text 필드만 전달)
-                decision = await ask_gemma_brain(text)
-                response_message = await handle_brain_decision(decision, text)
+            response_message = await process_arcus_message(
+                text=text,
+                attachment_type=attachment_type,
+                attachment_data=attachment_data,
+                attachment_name=attachment_name,
+                message_id=message_id,
+            )
             
             await websocket.send_text(response_message)
             logging.info(f"Sent to WS: {response_message}")

@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server'
 
+import { requireAllowedUser } from '@/auth/requireAllowedUser'
+import { getAuthFailure } from '@/auth/routeProtection'
+
 export async function GET() {
+  const authFailure = getAuthFailure(await requireAllowedUser())
+
+  if (authFailure) {
+    return NextResponse.json(authFailure.body, { status: authFailure.status })
+  }
+
   return NextResponse.json({
-    thinkpadWsUrl: process.env.NEXT_PUBLIC_THINKPAD_WS_URL ?? process.env.THINKPAD_WS_URL ?? 'ws://100.122.25.31:8000/ws',
-    wsToken: process.env.WS_TOKEN ?? 'SECRET_KEY'
+    authenticated: true,
+    transport: 'bff_pending',
   })
 }

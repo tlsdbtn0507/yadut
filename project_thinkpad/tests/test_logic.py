@@ -99,6 +99,52 @@ async def test_handle_brain_decision_web_search_uses_user_text_when_query_missin
 
     mock_search.assert_awaited_once_with("현재 대한민국에서 가장 뜨거운 뉴스가 뭐야?")
     assert result == "검색 결과가 부족합니다."
+
+def test_bridge_authorization_requires_bearer_token():
+    from main import is_bridge_authorized
+
+    with patch.dict("os.environ", {"THINKPAD_BRIDGE_TOKEN": "SERVER_TOKEN"}):
+        assert is_bridge_authorized("Bearer SERVER_TOKEN") is True
+        assert is_bridge_authorized("SERVER_TOKEN") is False
+        assert is_bridge_authorized("Bearer WRONG") is False
+        assert is_bridge_authorized(None) is False
+
+@pytest.mark.asyncio
+@patch("main.handle_brain_decision")
+@patch("main.ask_gemma_brain")
+async def test_process_arcus_message_text_uses_existing_brain_flow(mock_ask, mock_handle):
+    from main import process_arcus_message
+
+    mock_ask.return_value = {"message": "안녕하세요", "action": "NONE"}
+    mock_handle.return_value = "안녕하세요"
+
+    result = await process_arcus_message(text="안녕")
+
+    mock_ask.assert_awaited_once_with("안녕")
+    mock_handle.assert_awaited_once_with({"message": "안녕하세요", "action": "NONE"}, "안녕")
+    assert result == "안녕하세요"
+
+@pytest.mark.asyncio
+@patch.dict("os.environ", {"THINKPAD_BRIDGE_TOKEN": "SERVER_TOKEN"})
+@patch("main.process_arcus_message")
+async def test_arcus_message_endpoint_requires_server_token(mock_process):
+    from fastapi import HTTPException
+    from main import ArcusMessageRequest, arcus_message_endpoint
+
+    mock_process.return_value = "응답"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await arcus_message_endpoint(ArcusMessageRequest(text="안녕"), authorization=None)
+
+    assert exc_info.value.status_code == 401
+
+    result = await arcus_message_endpoint(
+        ArcusMessageRequest(text="안녕"),
+        authorization="Bearer SERVER_TOKEN",
+    )
+
+    assert result == {"success": True, "message": "응답"}
+    mock_process.assert_awaited_once()
     
 @pytest.mark.asyncio
 @patch("main.classify_image_intent")
