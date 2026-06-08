@@ -43,22 +43,29 @@ iPhone WebView / Safari / Desktop Browser
 
 목표는 어느 기기에서든 Tailscale 없이 안전하게 야두트를 쓰는 것이다.
 
-- Auth.js + Google OAuth 로그인 추가
-- 특정 Google 이메일 allowlist 기반 인가 적용
-- 미로그인 사용자를 위한 로그인 페이지와 세션 게이트 추가
-- allowlist 밖 Google 계정에 대한 접근 거부 화면 추가
-- `/api/runtime-config`에서 ThinkPad URL과 WS token을 클라이언트에 내려주는 구조 제거
-- 웹 클라이언트의 직접 WebSocket 연결 제거
-- Vercel API route가 로그인/인가를 확인한 뒤 ThinkPad Funnel HTTP endpoint로 명령 전달
-- 지원 기능:
-  - 텍스트 채팅
-  - 이미지 첨부
-  - 맥북 화면 캡처
-  - 이미지 기반 캘린더 등록
-- iOS 앱:
-  - WKWebView로 Vercel 앱 표시
-  - 앱 실행 및 foreground 복귀 시 Face ID 로컬 잠금
-  - 공유 시트로 받은 텍스트/이미지/파일을 WebView에 전달
+현재 배포 상태에서는 모바일 브라우저로 Vercel 웹앱에 접속할 수 있고, 이미지 기반 스케줄 등록을 통해 macOS 캘린더에 일정을 추가할 수 있다.
+
+- [x] ~~Auth.js + Google OAuth 로그인 추가~~
+- [x] ~~특정 Google 이메일 allowlist 기반 인가 적용~~
+- [x] ~~미로그인 사용자를 위한 로그인 페이지와 세션 게이트 추가~~
+- [x] ~~allowlist 밖 Google 계정에 대한 접근 거부 화면 추가~~
+- [x] ~~/api/runtime-config에서 ThinkPad URL과 WS token을 클라이언트에 내려주는 구조 제거~~
+- [x] ~~웹 클라이언트의 직접 WebSocket 연결 제거~~
+- [x] ~~Vercel API route가 로그인/인가를 확인한 뒤 ThinkPad Funnel HTTP endpoint로 명령 전달하는 코드 경로 추가~~
+- [x] 지원 기능:
+  - [x] ~~텍스트 채팅 BFF 요청/응답 경로 구현~~
+  - [x] ~~이미지 첨부 payload 정리 및 BFF 전달 경로 구현~~
+  - [x] ~~텍스트 채팅 개발환경 E2E 검증~~
+  - [x] ~~이미지 첨부 개발환경 E2E 검증~~
+  - [x] ~~Vercel Preview에서 Google 로그인 후 채팅 E2E 검증~~
+  - [x] ~~`THINKPAD_FUNNEL_URL`, `THINKPAD_BRIDGE_TOKEN` 배포/로컬/ThinkPad 환경변수 최종 정리~~
+  - [x] ~~ThinkPad 서버 재시작 후 Funnel endpoint 실요청 검증~~
+  - [x] ~~맥북 화면 캡처~~
+  - [x] ~~이미지 기반 캘린더 등록~~
+- [ ] iOS 앱:
+  - [ ] WKWebView로 Vercel 앱 표시
+  - [ ] 앱 실행 및 foreground 복귀 시 Face ID 로컬 잠금
+  - [ ] 공유 시트로 받은 텍스트/이미지/파일을 WebView에 전달
 
 ## v1.5: SSE Processing Feel
 
