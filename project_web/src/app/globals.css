@@ -4,19 +4,26 @@
   --accent-cyan: #00f3ff;
 }
 
+html,
+body {
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  width: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
+  overscroll-behavior: none;
   background-image: 
     radial-gradient(at 0% 0%, rgba(0, 243, 255, 0.05) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(189, 0, 255, 0.05) 0px, transparent 50%);
 }
-
