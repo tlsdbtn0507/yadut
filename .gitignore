@@ -13,6 +13,8 @@ ENV/
 # === ARCUS (Yadut) 특화 ===
 project_mac/screenshots/*
 !project_mac/screenshots/.gitkeep
+project_mac/tests/browser_search_probe.py
+project_mac/tests/browser_search_probe_report.md
 
 # === Swift / Xcode (추후 iOS 이주용) ===
 build/
@@ -24,3 +26,4 @@ DerivedData/
 !*.xcworkspace/contents.xcworkspace
 **/xcuserdata/
 *.xcuserstate
+.vercel
