@@ -12,6 +12,7 @@ describe('shouldSubmitChatKey', () => {
         shiftKey: false,
         isComposing: false,
         keyCode: 13,
+        compositionSessionActive: false,
       }),
     ).toBe(true)
   })
@@ -23,6 +24,7 @@ describe('shouldSubmitChatKey', () => {
         shiftKey: true,
         isComposing: false,
         keyCode: 13,
+        compositionSessionActive: false,
       }),
     ).toBe(false)
   })
@@ -34,6 +36,7 @@ describe('shouldSubmitChatKey', () => {
         shiftKey: false,
         isComposing: true,
         keyCode: 13,
+        compositionSessionActive: false,
       }),
     ).toBe(false)
   })
@@ -45,6 +48,19 @@ describe('shouldSubmitChatKey', () => {
         shiftKey: false,
         isComposing: false,
         keyCode: 229,
+        compositionSessionActive: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('does not submit while the explicit composition session is active', () => {
+    expect(
+      shouldSubmitChatKey({
+        key: 'Enter',
+        shiftKey: false,
+        isComposing: false,
+        keyCode: 13,
+        compositionSessionActive: true,
       }),
     ).toBe(false)
   })

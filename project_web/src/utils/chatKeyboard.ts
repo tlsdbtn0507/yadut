@@ -3,6 +3,7 @@ export type ChatKeyEvent = {
   shiftKey: boolean
   isComposing: boolean
   keyCode: number
+  compositionSessionActive: boolean
 }
 
 export function shouldSubmitChatKey(event: ChatKeyEvent): boolean {
@@ -10,6 +11,7 @@ export function shouldSubmitChatKey(event: ChatKeyEvent): boolean {
     event.key === 'Enter' &&
     !event.shiftKey &&
     !event.isComposing &&
-    event.keyCode !== 229
+    event.keyCode !== 229 &&
+    !event.compositionSessionActive
   )
 }

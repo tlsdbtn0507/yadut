@@ -60,6 +60,8 @@ export default function ArcusConsole() {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const isComposingRef = useRef(false)
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Confirm the authenticated Vercel BFF is reachable without exposing bridge secrets.
   useEffect(() => {
@@ -96,6 +98,14 @@ export default function ArcusConsole() {
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
     }
   }, [inputText])
+
+  useEffect(() => {
+    return () => {
+      if (compositionEndTimerRef.current) {
+        clearTimeout(compositionEndTimerRef.current)
+      }
+    }
+  }, [])
 
   // Paperclip Action: Simulate attachments
   const handleAttachmentClick = () => {
@@ -281,17 +291,36 @@ export default function ArcusConsole() {
     setIsThinking(false)
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleCompositionStart = () => {
+    if (compositionEndTimerRef.current) {
+      clearTimeout(compositionEndTimerRef.current)
+      compositionEndTimerRef.current = null
+    }
+    isComposingRef.current = true
+  }
+
+  const handleCompositionEnd = () => {
+    if (compositionEndTimerRef.current) {
+      clearTimeout(compositionEndTimerRef.current)
+    }
+    compositionEndTimerRef.current = setTimeout(() => {
+      isComposingRef.current = false
+      compositionEndTimerRef.current = null
+    }, 0)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       shouldSubmitChatKey({
         key: e.key,
         shiftKey: e.shiftKey,
         isComposing: e.nativeEvent.isComposing,
         keyCode: e.keyCode,
+        compositionSessionActive: isComposingRef.current,
       })
     ) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
@@ -446,6 +475,8 @@ export default function ArcusConsole() {
           ref={textareaRef}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onKeyDown={handleKeyDown}
           placeholder="마스터, 지시 사항을 입력하십시오..."
           rows={1}
