@@ -125,6 +125,94 @@ async def test_process_arcus_message_text_uses_existing_brain_flow(mock_ask, moc
     assert result == "안녕하세요"
 
 @pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+@patch("httpx.AsyncClient.get")
+async def test_process_arcus_message_image_schedule_command_bypasses_llm_classifier(mock_get, mock_post, mock_classify):
+    from main import process_arcus_message
+    import base64
+
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_schedule_test.png",
+    }
+    mock_post.return_value = mock_upload_res
+
+    mock_sync_res = MagicMock()
+    mock_sync_res.json.return_value = {
+        "status": "success",
+        "message": "Calendar updated",
+    }
+    mock_get.return_value = mock_sync_res
+
+    result = await process_arcus_message(
+        text="이번주 내 스케줄 캘린더에 넣어줘",
+        attachment_type="image",
+        attachment_data=base64.b64encode(b"fake_image_data").decode("utf-8"),
+        message_id="test",
+    )
+
+    mock_classify.assert_not_awaited()
+    mock_post.assert_called_once()
+    mock_get.assert_called_once()
+    assert "sync_calendar/remote_schedule_test.png" in mock_get.call_args[0][0]
+    assert result == "Calendar updated"
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_process_arcus_message_image_without_text_asks_for_intent(mock_post, mock_classify):
+    from main import process_arcus_message
+    import base64
+
+    result = await process_arcus_message(
+        text="   ",
+        attachment_type="image",
+        attachment_data=base64.b64encode(b"fake_image_data").decode("utf-8"),
+        message_id="test",
+    )
+
+    mock_classify.assert_not_awaited()
+    mock_post.assert_not_called()
+    assert "이미지로 무엇을 도와드릴까요" in result
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_process_arcus_message_general_image_question_keeps_image_chat_flow(mock_post, mock_classify):
+    from main import process_arcus_message
+    import base64
+
+    mock_classify.return_value = "IMAGE_CHAT"
+
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_image_chat.png",
+    }
+
+    mock_chat_res = MagicMock()
+    mock_chat_res.json.return_value = {
+        "status": "success",
+        "message": "사진 설명입니다.",
+    }
+
+    mock_post.side_effect = [mock_upload_res, mock_chat_res]
+
+    result = await process_arcus_message(
+        text="이 사진은 뭐야?",
+        attachment_type="image",
+        attachment_data=base64.b64encode(b"fake_image_data").decode("utf-8"),
+        message_id="test",
+    )
+
+    mock_classify.assert_awaited_once()
+    assert mock_post.call_count == 2
+    assert "chat_with_image" in mock_post.call_args_list[1][0][0]
+    assert result == "사진 설명입니다."
+
+@pytest.mark.asyncio
 @patch.dict("os.environ", {"THINKPAD_BRIDGE_TOKEN": "SERVER_TOKEN"})
 @patch("main.process_arcus_message")
 async def test_arcus_message_endpoint_requires_server_token(mock_process):

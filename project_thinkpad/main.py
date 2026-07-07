@@ -33,6 +33,12 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # 글로벌 상태 관리 (단순화)
 PENDING_ACTION = {"type": None, "content": None}
+IMAGE_INTENT_CLARIFY_MESSAGE = (
+    "마스터, 이미지를 확인했습니다. 이 이미지로 무엇을 도와드릴까요? "
+    "일정 등록, 내용 분석, 요약 중 원하시는 작업을 말씀해 주십시오."
+)
+SCHEDULE_TARGET_KEYWORDS = ("캘린더", "일정", "스케줄", "근무표", "시간표")
+SCHEDULE_ACTION_KEYWORDS = ("넣어", "등록", "추가", "동기화", "반영")
 
 class ArcusMessageRequest(BaseModel):
     text: str = ""
@@ -73,6 +79,15 @@ def get_current_context(now: datetime | None = None) -> str:
 
 def build_brain_prompt(soul_context: str, user_text: str, now: datetime | None = None) -> str:
     return f"{soul_context}\n\n[현재 컨텍스트]\n{get_current_context(now)}\n\nUser: {user_text}\nDecision:"
+
+def has_explicit_schedule_sync_command(user_text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", user_text).strip()
+    if not normalized:
+        return False
+
+    has_target = any(keyword in normalized for keyword in SCHEDULE_TARGET_KEYWORDS)
+    has_action = any(keyword in normalized for keyword in SCHEDULE_ACTION_KEYWORDS)
+    return has_target and has_action
 
 def clean_search_text(value: str) -> str:
     return html.unescape(re.sub(r"\s+", " ", re.sub(r"<.*?>", "", value))).strip()
@@ -239,7 +254,13 @@ async def process_arcus_message(
     message_id: str = "http",
 ) -> str:
     if attachment_type == "image" and attachment_data:
-        intent = await classify_image_intent(text, attachment_data)
+        if not text.strip():
+            return IMAGE_INTENT_CLARIFY_MESSAGE
+
+        if has_explicit_schedule_sync_command(text):
+            intent = "SCHEDULE_SYNC"
+        else:
+            intent = await classify_image_intent(text, attachment_data)
         logging.info(f"Image intent classified as: {intent}")
 
         import base64
