@@ -6,12 +6,16 @@
 //
 
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct arcusApp: App {
     var body: some Scene {
         WindowGroup {
-            MainConsoleView()
+            NativeGoogleAuthGate()
+                .onOpenURL { url in
+                    GIDSignIn.sharedInstance.handle(url)
+                }
         }
     }
 }

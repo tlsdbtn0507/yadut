@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		25C9331B2FFCD0820091AFEF /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 25C9331A2FFCD0820091AFEF /* GoogleSignIn */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		253521612FB978E0001A9A26 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				25C9331B2FFCD0820091AFEF /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,7 +83,9 @@
 				253521552FB978DE001A9A26 /* arcus */,
 				253521632FB978E0001A9A26 /* arcusTests */,
 				2535216D2FB978E0001A9A26 /* arcusUITests */,
+				25C933192FFCD0820091AFEF /* Frameworks */,
 				253521542FB978DE001A9A26 /* Products */,
+				25C9331E2FFD25130091AFEF /* Services */,
 			);
 			sourceTree = "<group>";
 		};
@@ -90,6 +97,20 @@
 				2535216A2FB978E0001A9A26 /* arcusUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		25C933192FFCD0820091AFEF /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		25C9331E2FFD25130091AFEF /* Services */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +133,7 @@
 			);
 			name = arcus;
 			packageProductDependencies = (
+				25C9331A2FFCD0820091AFEF /* GoogleSignIn */,
 			);
 			productName = arcus;
 			productReference = 253521532FB978DE001A9A26 /* arcus.app */;
@@ -195,6 +217,9 @@
 			);
 			mainGroup = 2535214A2FB978DE001A9A26;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				25C933182FFCCFDC0091AFEF /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 253521542FB978DE001A9A26 /* Products */;
 			projectDirPath = "";
@@ -400,7 +425,8 @@
 				DEVELOPMENT_TEAM = LZA952673U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CustomInfo.plist";				INFOPLIST_KEY_NSMicrophoneUsageDescription = "아르커스가 당신의 명령을 듣기 위해 마이크 권한이 필요합니다.";
+				INFOPLIST_FILE = CustomInfo.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "아르커스가 당신의 명령을 듣기 위해 마이크 권한이 필요합니다.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "음성 명령을 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -434,7 +460,8 @@
 				DEVELOPMENT_TEAM = LZA952673U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CustomInfo.plist";				INFOPLIST_KEY_NSMicrophoneUsageDescription = "아르커스가 당신의 명령을 듣기 위해 마이크 권한이 필요합니다.";
+				INFOPLIST_FILE = CustomInfo.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "아르커스가 당신의 명령을 듣기 위해 마이크 권한이 필요합니다.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "음성 명령을 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -466,7 +493,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LZA952673U;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CustomInfo.plist";				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				INFOPLIST_FILE = CustomInfo.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yusu.test.arcusTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -488,7 +516,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LZA952673U;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CustomInfo.plist";				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				INFOPLIST_FILE = CustomInfo.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yusu.test.arcusTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -509,7 +538,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LZA952673U;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CustomInfo.plist";				MARKETING_VERSION = 1.0;
+				INFOPLIST_FILE = CustomInfo.plist;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yusu.test.arcusUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -529,7 +559,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LZA952673U;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "CustomInfo.plist";				MARKETING_VERSION = 1.0;
+				INFOPLIST_FILE = CustomInfo.plist;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yusu.test.arcusUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -582,6 +613,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		25C933182FFCCFDC0091AFEF /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		25C9331A2FFCD0820091AFEF /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 25C933182FFCCFDC0091AFEF /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2535214B2FB978DE001A9A26 /* Project object */;
 }
