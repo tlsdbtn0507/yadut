@@ -6,6 +6,7 @@ type NativeGoogleCredentials = Partial<Record<'code', unknown>>
 
 export async function authorizeNativeGoogleCredentials(
   credentials: NativeGoogleCredentials | undefined,
+  nowOrRequest?: number | Request,
 ): Promise<User | null> {
   const code = readNonEmptyString(credentials?.code)
 
@@ -13,7 +14,7 @@ export async function authorizeNativeGoogleCredentials(
     return null
   }
 
-  const user = consumeNativeLoginCode(code)
+  const user = consumeNativeLoginCode(code, readNow(nowOrRequest))
 
   if (!user) {
     return null
@@ -34,4 +35,8 @@ function readNonEmptyString(value: unknown): string | null {
 
   const trimmed = value.trim()
   return trimmed ? trimmed : null
+}
+
+function readNow(value: number | Request | undefined): number {
+  return typeof value === 'number' ? value : Date.now()
 }

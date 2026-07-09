@@ -2,37 +2,43 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import {
-  __resetNativeLoginCodes,
-  issueNativeLoginCode,
-} from '../nativeLoginCode'
+import { issueNativeLoginCode } from '../nativeLoginCode'
 import { authorizeNativeGoogleCredentials } from '../nativeCredentials'
 
 describe('native Google credentials authorize', () => {
+  const originalEnv = process.env
+
   afterEach(() => {
-    __resetNativeLoginCodes()
+    process.env = originalEnv
   })
 
-  it('returns an Auth.js user for a valid native one-time code', async () => {
-    const { code } = issueNativeLoginCode({
-      email: 'me@gmail.com',
-      name: 'Arcus User',
-      image: 'https://example.com/me.png',
-    })
+  it('returns an Auth.js user for a valid signed native code', async () => {
+    process.env = {
+      ...originalEnv,
+      AUTH_SECRET: 'test-auth-secret',
+    }
+    const { code } = issueNativeLoginCode(
+      {
+        email: 'me@gmail.com',
+        name: 'Arcus User',
+        image: 'https://example.com/me.png',
+      },
+      1_000,
+    )
 
     await expect(
       authorizeNativeGoogleCredentials({
         code,
-      }),
+      }, 1_001),
     ).resolves.toEqual({
       id: 'me@gmail.com',
       email: 'me@gmail.com',
       name: 'Arcus User',
-      image: 'https://example.com/me.png',
+      image: null,
     })
   })
 
-  it('rejects missing and unknown native one-time codes', async () => {
+  it('rejects missing and malformed native codes', async () => {
     await expect(authorizeNativeGoogleCredentials({})).resolves.toBeNull()
     await expect(
       authorizeNativeGoogleCredentials({
@@ -41,27 +47,46 @@ describe('native Google credentials authorize', () => {
     ).resolves.toBeNull()
   })
 
-  it('consumes a native one-time code only once', async () => {
-    const { code } = issueNativeLoginCode({
-      email: 'me@gmail.com',
-      name: null,
-      image: null,
-    })
+  it('rejects tampered signed native codes', async () => {
+    process.env = {
+      ...originalEnv,
+      AUTH_SECRET: 'test-auth-secret',
+    }
+    const { code } = issueNativeLoginCode(
+      {
+        email: 'me@gmail.com',
+        name: null,
+        image: null,
+      },
+      1_000,
+    )
+    const tamperedCode = `${code.slice(0, -1)}x`
+
+    await expect(
+      authorizeNativeGoogleCredentials({
+        code: tamperedCode,
+      }),
+    ).resolves.toBeNull()
+  })
+
+  it('rejects expired signed native codes', async () => {
+    process.env = {
+      ...originalEnv,
+      AUTH_SECRET: 'test-auth-secret',
+    }
+    const { code } = issueNativeLoginCode(
+      {
+        email: 'me@gmail.com',
+        name: null,
+        image: null,
+      },
+      1_000,
+    )
 
     await expect(
       authorizeNativeGoogleCredentials({
         code,
-      }),
-    ).resolves.toEqual({
-      id: 'me@gmail.com',
-      email: 'me@gmail.com',
-      name: 'me@gmail.com',
-      image: null,
-    })
-    await expect(
-      authorizeNativeGoogleCredentials({
-        code,
-      }),
+      }, 1_000 + 181_000),
     ).resolves.toBeNull()
   })
 })

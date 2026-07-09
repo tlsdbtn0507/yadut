@@ -2,8 +2,6 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { __resetNativeLoginCodes } from '@/auth/nativeLoginCode'
-
 import { POST } from '../route'
 
 describe('/api/native-auth/exchange', () => {
@@ -13,7 +11,6 @@ describe('/api/native-auth/exchange', () => {
   afterEach(() => {
     process.env = originalEnv
     global.fetch = originalFetch
-    __resetNativeLoginCodes()
     vi.restoreAllMocks()
   })
 
@@ -21,6 +18,7 @@ describe('/api/native-auth/exchange', () => {
     process.env = {
       ...originalEnv,
       AUTH_ALLOWED_EMAILS: 'me@gmail.com',
+      AUTH_SECRET: 'test-auth-secret',
       GOOGLE_IOS_SERVER_CLIENT_ID: 'web-client-id.apps.googleusercontent.com',
     }
     global.fetch = vi.fn(async () =>
@@ -48,7 +46,7 @@ describe('/api/native-auth/exchange', () => {
       code: expect.any(String),
       expiresInSeconds: 180,
     })
-    expect(body.code).toHaveLength(36)
+    expect(body.code.split('.')).toHaveLength(2)
     expect(global.fetch).toHaveBeenCalledWith(
       'https://oauth2.googleapis.com/tokeninfo?id_token=native-google-id-token',
     )
@@ -72,6 +70,7 @@ describe('/api/native-auth/exchange', () => {
     process.env = {
       ...originalEnv,
       AUTH_ALLOWED_EMAILS: 'me@gmail.com',
+      AUTH_SECRET: 'test-auth-secret',
       GOOGLE_IOS_SERVER_CLIENT_ID: 'web-client-id.apps.googleusercontent.com',
     }
     global.fetch = vi.fn(async () =>
@@ -101,6 +100,7 @@ describe('/api/native-auth/exchange', () => {
     process.env = {
       ...originalEnv,
       AUTH_ALLOWED_EMAILS: 'me@gmail.com',
+      AUTH_SECRET: 'test-auth-secret',
       GOOGLE_IOS_SERVER_CLIENT_ID: 'web-client-id.apps.googleusercontent.com',
     }
     global.fetch = vi.fn(async () =>
