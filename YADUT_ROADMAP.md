@@ -22,6 +22,18 @@
 - 이번 지시를 우선해서 roadmap을 수정할지
 - 기존 roadmap을 유지하고 지시를 조정할지
 
+## Immediate Priority
+
+현재 가장 급한 작업은 iOS WebView 기반 사용 흐름을 안정화하는 것이다. `project_ios`는 WKWebView로 Vercel ARCUS 웹앱을 표시하고, 네이티브 Google 로그인으로 웹 세션을 생성하는 기본 흐름까지 연결되었다.
+
+현재 실행 우선순위는 다음과 같다.
+
+1. 이미지 첨부 안정화
+2. SSE 처리 상태 스트리밍 추가
+3. 공유 시트 수신 구현
+4. Face ID 로컬 앱 잠금 구현
+5. 과거 WebSocket 직접 연결 코드 정리
+
 ## Architecture Direction
 
 방향은 **프록시 안정화 우선**이다.
@@ -63,13 +75,22 @@ iPhone WebView / Safari / Desktop Browser
   - [x] ~~맥북 화면 캡처~~
   - [x] ~~이미지 기반 캘린더 등록~~
 - [ ] iOS 앱:
-  - [ ] WKWebView로 Vercel 앱 표시
-  - [ ] 앱 실행 및 foreground 복귀 시 Face ID 로컬 잠금
+  - [x] ~~WKWebView로 Vercel 앱 표시~~
+  - [x] ~~네이티브 Google 로그인 후 Vercel 웹 세션 생성~~
   - [ ] 공유 시트로 받은 텍스트/이미지/파일을 WebView에 전달
+  - [ ] 앱 실행 및 foreground 복귀 시 Face ID 로컬 잠금
+- [ ] 이미지 첨부 안정화:
+  - [ ] 웹에서 이미지 전송 전 JPEG 리사이즈/압축 적용
+  - [ ] Web → BFF → ThinkPad payload에 `attachment_mime` 추가
+  - [ ] ThinkPad 이미지 분류/업로드/분석 경로에서 하드코딩된 MIME 제거
+  - [ ] BFF와 ThinkPad의 이미지 실패 응답을 `error_code`, `error_stage` 기준으로 정규화
+  - [ ] iOS WebView UI에서 이미지 압축 실패, payload 과대, ThinkPad 처리 실패를 구분해 표시
 
 ## v1.5: SSE Processing Feel
 
 목표는 "아르커스가 처리 중"이라는 감각을 실제 서버 이벤트와 연결하는 것이다.
+
+iOS WebView 기본 흐름과 이미지 첨부 안정화 직후 착수할 다음 우선순위 작업이다. 이미지 첨부 안정화에서 추가하는 `attachment_mime`, `error_code`, `error_stage`는 SSE 이벤트 payload에서도 재사용한다.
 
 - v1 HTTP API는 유지
 - 채팅/이미지 처리용 SSE endpoint 추가
