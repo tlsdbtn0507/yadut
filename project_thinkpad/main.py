@@ -1,4 +1,5 @@
 import os
+from schedule_response import format_schedule_sync_message
 import re
 import asyncio
 import logging
@@ -286,6 +287,9 @@ async def process_arcus_message(
                     sync_result = sync_res.json()
 
                     if sync_result.get("status") == "success":
+                        schedules = sync_result.get("schedules")
+                        if isinstance(schedules, list):
+                            return format_schedule_sync_message(schedules)
                         return sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
                     return f"❌ 동기화 실패: {sync_result.get('message')}"
 

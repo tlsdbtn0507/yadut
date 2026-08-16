@@ -101,9 +101,13 @@ async def sync_calendar(filename: str):
         if not os.path.exists(filepath):
             return {"status": "error", "message": "파일을 찾을 수 없습니다."}
         
-        success = sync_image_to_calendar(filepath, use_local=False)
-        if success:
-            return {"status": "success", "message": "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!"}
+        successful_schedules = sync_image_to_calendar(filepath, use_local=False)
+        if successful_schedules:
+            return {
+                "status": "success",
+                "message": "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!",
+                "schedules": successful_schedules,
+            }
         else:
             return {"status": "error", "message": "죄송합니다, 마스터. 일정 분석 및 캘린더 등록에 실패했습니다. 이미지 상태를 다시 확인해 주시겠습니까?"}
     except Exception as e:

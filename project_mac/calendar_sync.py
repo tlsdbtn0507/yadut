@@ -207,7 +207,7 @@ def extract_schedule_from_image_gemini(image_path):
         print(f"❌ Gemini 호출 에러: {e}")
         return None
 
-def sync_image_to_calendar(image_path, use_local=False):
+def sync_image_to_calendar(image_path: str, use_local: bool = False) -> list[dict[str, str]]:
     """
     이미지 분석부터 모든 일정 등록까지 수행합니다.
     """
@@ -218,20 +218,20 @@ def sync_image_to_calendar(image_path, use_local=False):
     
     if schedules and isinstance(schedules, list):
         print(f"📅 총 {len(schedules)}개의 일정이 인식되었습니다.")
-        success_count = 0
+        successful_schedules: list[dict[str, str]] = []
         for item in schedules:
             if add_event_to_calendar(
                 summary=item["summary"],
                 start_time=item["start_time"],
                 end_time=item.get("end_time")
             ):
-                success_count += 1
+                successful_schedules.append(item)
         
-        print(f"🏁 완료: {len(schedules)}개 중 {success_count}개 등록/업데이트 성공")
-        return success_count > 0
+        print(f"🏁 완료: {len(schedules)}개 중 {len(successful_schedules)}개 등록/업데이트 성공")
+        return successful_schedules
     else:
         print("❌ 추출된 일정 리스트가 없습니다.")
-    return False
+    return []
 
 def chat_about_image(prompt: str, image_path: str) -> str:
     """
@@ -302,4 +302,3 @@ if __name__ == "__main__":
             sync_image_to_calendar(img, use_local=False)
         else:
             print(f"파일이 없습니다: {img}")
-
