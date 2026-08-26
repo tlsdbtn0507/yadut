@@ -202,14 +202,14 @@ project_mac
 
 ## Next Development Target
 
-다음 큰 개발 단계는 `YADUT_ROADMAP.md`의 iOS 앱 항목과 v1.5 SSE 처리 상태 스트리밍이다.
+다음 큰 개발 단계는 `YADUT_ROADMAP.md`의 Immediate Priority를 따른다. 현재 가장 급한 작업은 기존 `project_ios` 코드를 수정해 Vercel ARCUS 웹앱을 WKWebView로 감싸는 것이다.
 
 우선순위:
 
 1. iOS WKWebView 래퍼 구현
-2. Face ID 로컬 앱 잠금 구현
+2. SSE 처리 상태 스트리밍 추가
 3. 공유 시트 수신 구현
-4. SSE 처리 상태 스트리밍 추가
+4. Face ID 로컬 앱 잠금 구현
 5. 과거 WebSocket 직접 연결 코드 정리
 
 ## Relationship To Roadmap
