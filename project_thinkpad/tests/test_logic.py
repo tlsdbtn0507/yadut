@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
-from main import build_brain_prompt, handle_brain_decision, parse_brain_response, handle_message, websocket_endpoint
+from main import build_brain_prompt, handle_brain_decision, parse_brain_response, websocket_endpoint
 
 # 1. parse_brain_response 테스트 (단순 함수)
 def test_parse_brain_response_normal():
@@ -28,39 +28,6 @@ def test_build_brain_prompt_includes_kst_context():
     assert "[현재 컨텍스트]" in result
     assert "현재 한국 시간(KST): 2026년 5월 25일 월요일 18시 30분" in result
     assert "User: 오늘 무슨날이야?" in result
-
-# 2. handle_message 라우팅 테스트 (Async)
-@pytest.mark.asyncio
-@patch("main.ask_gemma_brain")
-@patch("main.execute_capture_skill")
-async def test_handle_message_routing_none(mock_capture, mock_ask):
-    # Mock LLM 응답: 일반 대화
-    mock_ask.return_value = {"message": "위로의 말", "action": "NONE"}
-    
-    # Mock Telegram Update/Context
-    update = AsyncMock()
-    update.message.text = "나 오늘 너무 힘들었어"
-    context = MagicMock()
-    
-    await handle_message(update, context)
-    
-    # 검증: 캡처 기능이 호출되지 않아야 함
-    mock_capture.assert_not_called()
-    # 검증: 유저에게 응답 메시지가 전달되어야 함
-    update.message.reply_text.assert_called_with("위로의 말")
-
-@pytest.mark.asyncio
-@patch("main.ask_gemma_brain")
-@patch("main.execute_capture_skill")
-async def test_handle_message_routing_capture(mock_capture, mock_ask):
-    # Mock LLM 응답: 캡처 명령
-    mock_ask.return_value = {"message": "화면을 확인할게요", "action": "CAPTURE"}
-    
-    update = AsyncMock()
-    update.message.text = "지금 화면 좀 봐줘"
-    context = MagicMock()
-    
-    await handle_message(update, context)
 
 @pytest.mark.asyncio
 @patch("main.ask_gemma_with_search_context")
@@ -245,60 +212,6 @@ async def test_arcus_message_endpoint_requires_server_token(mock_process):
 
     assert result == {"success": True, "message": "응답"}
     mock_process.assert_awaited_once()
-    
-@pytest.mark.asyncio
-@patch("main.classify_image_intent")
-@patch("httpx.AsyncClient.post")
-@patch("httpx.AsyncClient.get")
-async def test_handle_photo_success(mock_get, mock_post, mock_classify):
-    # Mock intent classification to return SCHEDULE_SYNC
-    mock_classify.return_value = "SCHEDULE_SYNC"
-    
-    # Mock Telegram Update/Context
-    update = AsyncMock()
-    
-    # Mock photo data
-    mock_photo = AsyncMock()
-    mock_photo.get_file = AsyncMock(return_value=AsyncMock(download_as_bytearray=AsyncMock(return_value=b"fake_image_data")))
-    update.message.photo = [mock_photo]
-    update.message.message_id = 12345
-    
-    context = MagicMock()
-    
-    # Mock httpx.post response for upload
-    mock_upload_res = MagicMock()
-    mock_upload_res.status_code = 200
-    mock_upload_res.json.return_value = {
-        "status": "success", 
-        "filename": "remote_schedule_12345.png",
-        "message": "File uploaded"
-    }
-    mock_post.return_value = mock_upload_res
-    
-    # Mock httpx.get response for sync
-    mock_sync_res = MagicMock()
-    mock_sync_res.status_code = 200
-    mock_sync_res.json.return_value = {"status": "success", "message": "Calendar updated"}
-    mock_get.return_value = mock_sync_res
-    
-    from main import handle_photo
-    await handle_photo(update, context)
-    
-    # Verify sequence
-    update.message.reply_text.assert_any_call("🗓️ 스케줄 이미지를 수신했습니다. 분석 및 캘린더 등록을 시작합니다...")
-    
-    # Verify upload call
-    mock_post.assert_called_once()
-    args, kwargs = mock_post.call_args
-    assert "upload" in args[0]
-    
-    # Verify sync call (GET /sync_calendar/remote_schedule_12345.png)
-    mock_get.assert_called_once()
-    sync_args, _ = mock_get.call_args
-    assert "sync_calendar/remote_schedule_12345.png" in sync_args[0]
-    
-    # Verify final success message
-    update.message.reply_text.assert_any_call("🚀 Calendar updated")
 
 @pytest.mark.asyncio
 @patch.dict("os.environ", {"WS_TOKEN": "SECRET_KEY"})
