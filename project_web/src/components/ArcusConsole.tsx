@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { TelemetryMode, TelemetryStage, TelemetryEngine } from '../utils/telemetry'
 import { shouldSubmitChatKey } from '../utils/chatKeyboard'
 import { buildArcusPayload } from '../utils/arcusPayload'
+import { compressImageFile } from '../utils/imageCompression'
 import styles from '../app/page.module.css'
 
 interface Message {
@@ -25,6 +26,29 @@ type BridgeStatus = 'checking' | 'bff_pending' | 'error'
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error'
+}
+
+function getArcusErrorMessage(error: unknown): string {
+  const message = getErrorMessage(error)
+  if (message === 'IMAGE_COMPRESS_FAILED') {
+    return '이미지를 전송 가능한 형식으로 변환하지 못했습니다.'
+  }
+  if (message === 'IMAGE_TOO_LARGE') {
+    return '이미지 용량이 너무 큽니다. 더 작은 사진으로 다시 시도해 주세요.'
+  }
+  if (message === 'THINKPAD_IMAGE_PROCESSING_FAILED') {
+    return 'ThinkPad 이미지 처리 중 오류가 발생했습니다.'
+  }
+  if (message === 'IMAGE_DECODE_FAILED') {
+    return '이미지 데이터를 해석하지 못했습니다. 다시 첨부해 주세요.'
+  }
+  if (message === 'MACBOOK_UPLOAD_FAILED') {
+    return 'MacBook 서버로 이미지를 업로드하지 못했습니다.'
+  }
+  if (message === 'MACBOOK_IMAGE_CHAT_FAILED') {
+    return 'MacBook 이미지 분석 중 오류가 발생했습니다.'
+  }
+  return message
 }
 
 async function loadRuntimeConfig(): Promise<RuntimeConfig> {
@@ -112,17 +136,28 @@ export default function ArcusConsole() {
     fileInputRef.current?.click()
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     if (file.type.startsWith('image/')) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        setStagedImage(event.target?.result as string)
+      try {
+        const compressed = await compressImageFile(file)
+        setStagedImage(compressed.dataUrl)
         setStagedFile(null)
+      } catch (error: unknown) {
+        const now = new Date()
+        const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+        const arcusMessage: Message = {
+          id: `arcus-${now.getTime()}`,
+          sender: 'arcus',
+          text: getArcusErrorMessage(error),
+          time: timeString,
+          memoryUpdates: []
+        }
+        setMessages(prev => [...prev, arcusMessage])
+        removeStaged()
       }
-      reader.readAsDataURL(file)
     } else {
       setStagedFile({
         name: file.name,
@@ -212,7 +247,7 @@ export default function ArcusConsole() {
       const res = await response.json()
 
       if (!response.ok || !res.success) {
-        throw new Error(res.error || 'ThinkPad bridge request failed')
+        throw new Error(res.error_code ? getArcusErrorMessage(res.error_code) : res.error || 'ThinkPad bridge request failed')
       }
 
       const arcusMessage: Message = {
@@ -227,7 +262,7 @@ export default function ArcusConsole() {
       const arcusMessage: Message = {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
-        text: `죄송합니다, 마스터. 씽크패드 브리지 전송 중 오류가 발생했습니다: ${getErrorMessage(err)}`,
+        text: `죄송합니다, 마스터. 씽크패드 브리지 전송 중 오류가 발생했습니다: ${getArcusErrorMessage(err)}`,
         time: timeString,
         memoryUpdates: []
       }

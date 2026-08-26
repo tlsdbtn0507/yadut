@@ -8,6 +8,7 @@ import html
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -38,8 +39,28 @@ class ArcusMessageRequest(BaseModel):
     text: str = ""
     attachment_type: str | None = None
     attachment_data: str | None = None
+    attachment_mime: str | None = None
     attachment_name: str = "upload.jpg"
     message_id: str = "http"
+
+IMAGE_ERROR_DETAILS = {
+    "IMAGE_DECODE_FAILED": {
+        "stage": "thinkpad_image_decode",
+        "message": "이미지 데이터를 해석하지 못했습니다. 다시 첨부해 주십시오.",
+    },
+    "MACBOOK_UPLOAD_FAILED": {
+        "stage": "macbook_upload",
+        "message": "MacBook 서버로 이미지를 업로드하지 못했습니다.",
+    },
+    "MACBOOK_IMAGE_CHAT_FAILED": {
+        "stage": "macbook_image_chat",
+        "message": "MacBook 이미지 분석 중 오류가 발생했습니다.",
+    },
+    "THINKPAD_IMAGE_PROCESSING_FAILED": {
+        "stage": "thinkpad_image_processing",
+        "message": "ThinkPad 이미지 처리 중 오류가 발생했습니다.",
+    },
+}
 
 def is_bridge_authorized(authorization: str | None) -> bool:
     expected_token = os.getenv("THINKPAD_BRIDGE_TOKEN")
@@ -47,6 +68,23 @@ def is_bridge_authorized(authorization: str | None) -> bool:
         return False
 
     return authorization == f"Bearer {expected_token}"
+
+def build_image_error_message(error_code: str, detail: str | None = None) -> str:
+    error_detail = IMAGE_ERROR_DETAILS.get(error_code, IMAGE_ERROR_DETAILS["THINKPAD_IMAGE_PROCESSING_FAILED"])
+    suffix = f" ({detail})" if detail else ""
+    return f"{error_code}: {error_detail['message']}{suffix}"
+
+def parse_image_error_message(message: str) -> dict | None:
+    error_code = message.split(":", 1)[0]
+    if error_code not in IMAGE_ERROR_DETAILS:
+        return None
+
+    return {
+        "success": False,
+        "error": message,
+        "error_code": error_code,
+        "error_stage": IMAGE_ERROR_DETAILS[error_code]["stage"],
+    }
 
 def get_allowed_origins() -> list[str]:
     raw_origins = os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS)
@@ -244,6 +282,7 @@ async def process_arcus_message(
     text: str = "",
     attachment_type: str | None = None,
     attachment_data: str | None = None,
+    attachment_mime: str | None = None,
     attachment_name: str = "upload.jpg",
     message_id: str = "http",
 ) -> str | dict[str, object]:
@@ -251,25 +290,32 @@ async def process_arcus_message(
         if not text.strip():
             return IMAGE_INTENT_CLARIFY_MESSAGE
 
+        import base64
+        try:
+            image_bytes = base64.b64decode(attachment_data, validate=True)
+        except Exception as e:
+            logging.error(f"Arcus image decode error: {e}")
+            return build_image_error_message("IMAGE_DECODE_FAILED", str(e))
+
+        resolved_mime = attachment_mime or "image/jpeg"
+
         if has_explicit_schedule_sync_command(text):
             intent = "SCHEDULE_SYNC"
         else:
-            intent = await classify_image_intent(text, attachment_data)
+            intent = await classify_image_intent(text, attachment_data, resolved_mime)
         logging.info(f"Image intent classified as: {intent}")
 
-        import base64
         try:
-            image_bytes = base64.b64decode(attachment_data)
             temp_filename = f"schedule_{message_id}.jpg"
 
             async with httpx.AsyncClient(timeout=120.0) as client:
-                files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
+                files = {'file': (temp_filename, image_bytes, resolved_mime)}
                 upload_res = await client.post(f"{MACBOOK_URL}/upload", files=files)
                 upload_res.raise_for_status()
                 upload_data = upload_res.json()
 
                 if upload_data.get("status") != "success":
-                    return "❌ 업로드 실패: 마스터, 이미지 업로드에 실패했습니다. 다시 전송해 주시겠습니까?"
+                    return build_image_error_message("MACBOOK_UPLOAD_FAILED", upload_data.get("message"))
 
                 uploaded_filename = upload_data.get("filename")
 
@@ -290,7 +336,7 @@ async def process_arcus_message(
                     return f"❌ 동기화 실패: {sync_result.get('message')}"
 
                 logging.info(f"Starting multimodal image chat for {uploaded_filename}...")
-                chat_files = {'file': (temp_filename, image_bytes, 'image/jpeg')}
+                chat_files = {'file': (temp_filename, image_bytes, resolved_mime)}
                 chat_res = await client.post(
                     f"{MACBOOK_URL}/chat_with_image",
                     params={"prompt": text},
@@ -301,10 +347,10 @@ async def process_arcus_message(
 
                 if chat_result.get("status") == "success":
                     return chat_result.get("message")
-                return f"❌ 분석 실패: {chat_result.get('message')}"
+                return build_image_error_message("MACBOOK_IMAGE_CHAT_FAILED", chat_result.get("message"))
         except Exception as e:
             logging.error(f"Arcus image processing error: {e}")
-            return f"❌ 시스템 에러: {str(e)}"
+            return build_image_error_message("THINKPAD_IMAGE_PROCESSING_FAILED", str(e))
 
     decision = await ask_gemma_brain(text)
     return await handle_brain_decision(decision, text)
@@ -352,7 +398,7 @@ async def ask_gemma_brain(user_text):
         except Exception as e:
             return {"message": f"ERROR_COMMUNICATION: {str(e)}", "action": "NONE"}
 
-async def classify_image_intent(user_text: str, base64_image: str) -> str:
+async def classify_image_intent(user_text: str, base64_image: str, attachment_mime: str = "image/jpeg") -> str:
     """Gemma 4를 통해 수신한 이미지가 시간표(SCHEDULE_SYNC)인지 일반 대화용 사진(IMAGE_CHAT)인지 분석"""
     async with httpx.AsyncClient(timeout=120.0) as client:
         try:
@@ -381,7 +427,7 @@ async def classify_image_intent(user_text: str, base64_image: str) -> str:
                                 {
                                     "type": "image_url",
                                     "image_url": {
-                                        "url": f"data:image/png;base64,{base64_image}"
+                                        "url": f"data:{attachment_mime};base64,{base64_image}"
                                     }
                                 }
                             ]
@@ -433,12 +479,16 @@ async def arcus_message_endpoint(
         text=payload.text,
         attachment_type=payload.attachment_type,
         attachment_data=payload.attachment_data,
+        attachment_mime=payload.attachment_mime,
         attachment_name=payload.attachment_name,
         message_id=payload.message_id,
     )
     if isinstance(response, dict):
         return {"success": True, **response}
 
+    image_error = parse_image_error_message(response)
+    if image_error:
+        return JSONResponse(status_code=500, content=image_error)
     return {"success": True, "message": response}
 
 @app.websocket("/ws")
@@ -484,17 +534,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 text = message_json.get("text", "")
                 attachment_type = message_json.get("attachment_type")
                 attachment_data = message_json.get("attachment_data")
+                attachment_mime = message_json.get("attachment_mime")
                 attachment_name = message_json.get("attachment_name", "upload.jpg")
                 message_id = message_json.get("message_id", "ws")
             except json.JSONDecodeError:
                 text = data
                 attachment_type = None
                 attachment_data = None
+                attachment_mime = None
             
             response_message = await process_arcus_message(
                 text=text,
                 attachment_type=attachment_type,
                 attachment_data=attachment_data,
+                attachment_mime=attachment_mime,
                 attachment_name=attachment_name,
                 message_id=message_id,
             )

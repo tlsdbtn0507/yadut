@@ -10,6 +10,7 @@ describe('buildArcusPayload', () => {
       text: '안녕',
       attachment_type: null,
       attachment_data: null,
+      attachment_mime: null,
       attachment_name: 'upload.jpg',
       message_id: expect.stringMatching(/^web-\d+$/),
     })
@@ -26,6 +27,7 @@ describe('buildArcusPayload', () => {
       text: '이 이미지 봐줘',
       attachment_type: 'image',
       attachment_data: 'ABC123',
+      attachment_mime: 'image/jpeg',
       attachment_name: 'upload.jpg',
       message_id: 'client-1',
     })

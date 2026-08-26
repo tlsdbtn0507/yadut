@@ -183,13 +183,78 @@ async def test_process_arcus_message_general_image_question_keeps_image_chat_flo
         text="이 사진은 뭐야?",
         attachment_type="image",
         attachment_data=base64.b64encode(b"fake_image_data").decode("utf-8"),
+        attachment_mime="image/jpeg",
         message_id="test",
     )
 
-    mock_classify.assert_awaited_once()
+    mock_classify.assert_awaited_once_with(
+        "이 사진은 뭐야?",
+        base64.b64encode(b"fake_image_data").decode("utf-8"),
+        "image/jpeg",
+    )
     assert mock_post.call_count == 2
     assert "chat_with_image" in mock_post.call_args_list[1][0][0]
+    assert mock_post.call_args_list[0][1]["files"]["file"][2] == "image/jpeg"
+    assert mock_post.call_args_list[1][1]["files"]["file"][2] == "image/jpeg"
     assert result == "사진 설명입니다."
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_process_arcus_message_image_mime_falls_back_to_jpeg(mock_post, mock_classify):
+    from main import process_arcus_message
+    import base64
+
+    mock_classify.return_value = "IMAGE_CHAT"
+
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_image_chat.png",
+    }
+
+    mock_chat_res = MagicMock()
+    mock_chat_res.json.return_value = {
+        "status": "success",
+        "message": "사진 설명입니다.",
+    }
+
+    mock_post.side_effect = [mock_upload_res, mock_chat_res]
+
+    result = await process_arcus_message(
+        text="이 사진은 뭐야?",
+        attachment_type="image",
+        attachment_data=base64.b64encode(b"fake_image_data").decode("utf-8"),
+        message_id="test",
+    )
+
+    mock_classify.assert_awaited_once_with(
+        "이 사진은 뭐야?",
+        base64.b64encode(b"fake_image_data").decode("utf-8"),
+        "image/jpeg",
+    )
+    assert mock_post.call_args_list[0][1]["files"]["file"][2] == "image/jpeg"
+    assert mock_post.call_args_list[1][1]["files"]["file"][2] == "image/jpeg"
+    assert result == "사진 설명입니다."
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_process_arcus_message_invalid_base64_returns_image_error(mock_post, mock_classify):
+    from main import process_arcus_message
+
+    mock_classify.return_value = "IMAGE_CHAT"
+
+    result = await process_arcus_message(
+        text="이 사진은 뭐야?",
+        attachment_type="image",
+        attachment_data="not valid base64",
+        attachment_mime="image/jpeg",
+        message_id="test",
+    )
+
+    mock_post.assert_not_called()
+    assert "IMAGE_DECODE_FAILED" in result
 
 @pytest.mark.asyncio
 @patch.dict("os.environ", {"THINKPAD_BRIDGE_TOKEN": "SERVER_TOKEN"})

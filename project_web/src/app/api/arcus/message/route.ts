@@ -7,8 +7,16 @@ type ArcusMessagePayload = {
   text?: string
   attachment_type?: string | null
   attachment_data?: string | null
+  attachment_mime?: string | null
   attachment_name?: string
   message_id?: string
+}
+
+type BridgeErrorBody = {
+  detail?: string
+  error?: string
+  error_code?: string
+  error_stage?: string
 }
 
 function formatScheduleMessage(schedules: unknown): string | null {
@@ -54,6 +62,24 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Failed to connect to ThinkPad bridge'
 }
 
+function normalizeBridgeError(status: number, data: BridgeErrorBody) {
+  if (status === 413) {
+    return {
+      success: false,
+      error: '이미지 용량이 너무 큽니다. 더 작은 사진으로 다시 시도해 주세요.',
+      error_code: 'IMAGE_TOO_LARGE',
+      error_stage: 'bff_to_thinkpad',
+    }
+  }
+
+  return {
+    success: false,
+    error: data.error ?? data.detail ?? `ThinkPad returned ${status}`,
+    error_code: data.error_code ?? 'THINKPAD_REQUEST_FAILED',
+    error_stage: data.error_stage ?? 'bff_to_thinkpad',
+  }
+}
+
 export async function POST(request: Request) {
   const authFailure = getAuthFailure(await requireAllowedUser())
 
@@ -67,6 +93,7 @@ export async function POST(request: Request) {
       text: payload.text ?? '',
       attachment_type: payload.attachment_type ?? null,
       attachment_data: payload.attachment_data ?? null,
+      attachment_mime: payload.attachment_mime ?? null,
       attachment_name: payload.attachment_name ?? 'upload.jpg',
       message_id: payload.message_id ?? `web-${Date.now()}`,
     }
@@ -83,13 +110,9 @@ export async function POST(request: Request) {
     const data = await response.json()
 
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: data.detail ?? data.error ?? `ThinkPad returned ${response.status}`,
-        },
-        { status: response.status },
-      )
+      return NextResponse.json(normalizeBridgeError(response.status, data), {
+        status: response.status,
+      })
     }
 
     const message = formatScheduleMessage(data.schedules)

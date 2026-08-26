@@ -2,6 +2,7 @@ export type ArcusPayload = {
   text: string
   attachment_type: 'image' | null
   attachment_data: string | null
+  attachment_mime: 'image/jpeg' | null
   attachment_name: string
   message_id: string
 }
@@ -21,6 +22,7 @@ export function buildArcusPayload({
     text,
     attachment_type: attachmentData ? 'image' : null,
     attachment_data: attachmentData,
+    attachment_mime: attachmentData ? 'image/jpeg' : null,
     attachment_name: 'upload.jpg',
     message_id: messageId,
   }
