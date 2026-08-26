@@ -1,5 +1,4 @@
 import os
-from schedule_response import format_schedule_sync_message
 import re
 import asyncio
 import logging
@@ -253,7 +252,7 @@ async def process_arcus_message(
     attachment_data: str | None = None,
     attachment_name: str = "upload.jpg",
     message_id: str = "http",
-) -> str:
+) -> str | dict[str, object]:
     if attachment_type == "image" and attachment_data:
         if not text.strip():
             return IMAGE_INTENT_CLARIFY_MESSAGE
@@ -289,7 +288,10 @@ async def process_arcus_message(
                     if sync_result.get("status") == "success":
                         schedules = sync_result.get("schedules")
                         if isinstance(schedules, list):
-                            return format_schedule_sync_message(schedules)
+                            return {
+                                "message": sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!"),
+                                "schedules": schedules,
+                            }
                         return sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
                     return f"❌ 동기화 실패: {sync_result.get('message')}"
 
@@ -597,14 +599,17 @@ async def arcus_message_endpoint(
     if not is_bridge_authorized(authorization):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    message = await process_arcus_message(
+    response = await process_arcus_message(
         text=payload.text,
         attachment_type=payload.attachment_type,
         attachment_data=payload.attachment_data,
         attachment_name=payload.attachment_name,
         message_id=payload.message_id,
     )
-    return {"success": True, "message": message}
+    if isinstance(response, dict):
+        return {"success": True, **response}
+
+    return {"success": True, "message": response}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -664,8 +669,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 message_id=message_id,
             )
             
-            await websocket.send_text(response_message)
-            logging.info(f"Sent to WS: {response_message}")
+            message = response_message["message"] if isinstance(response_message, dict) else response_message
+            await websocket.send_text(str(message))
+            logging.info(f"Sent to WS: {message}")
             
     except WebSocketDisconnect:
         logging.info("WebSocket disconnected from iOS app")

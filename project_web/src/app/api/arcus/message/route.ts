@@ -11,6 +11,25 @@ type ArcusMessagePayload = {
   message_id?: string
 }
 
+function formatScheduleMessage(schedules: unknown): string | null {
+  if (!Array.isArray(schedules)) return null
+
+  const lines = schedules.flatMap((schedule) => {
+    if (
+      !schedule ||
+      typeof schedule !== 'object' ||
+      typeof schedule.start_time !== 'string' ||
+      typeof schedule.summary !== 'string'
+    ) {
+      return []
+    }
+
+    return `✅ ${schedule.start_time.slice(0, 10)} ${schedule.summary}`
+  })
+
+  return lines.length ? `마스터, 스케줄 등록이 완료되었습니다.\n\n${lines.join('\n')}` : null
+}
+
 function getThinkPadEndpoint(): string {
   const baseUrl = process.env.THINKPAD_FUNNEL_URL
 
@@ -73,7 +92,8 @@ export async function POST(request: Request) {
       )
     }
 
-    return NextResponse.json(data)
+    const message = formatScheduleMessage(data.schedules)
+    return NextResponse.json(message ? { ...data, message } : data)
   } catch (error: unknown) {
     return NextResponse.json(
       {

@@ -162,12 +162,14 @@ async def test_process_arcus_message_image_schedule_command_bypasses_llm_classif
     mock_post.assert_called_once()
     mock_get.assert_called_once()
     assert "sync_calendar/remote_schedule_test.png" in mock_get.call_args[0][0]
-    assert result == (
-        "마스터, 스케줄 등록이 완료되었습니다.\n\n"
-        "✅ 2026-08-17 마감\n"
-        "✅ 2026-08-18 오픈\n"
-        "✅ 2026-08-19 휴무"
-    )
+    assert result == {
+        "message": "Calendar updated",
+        "schedules": [
+            {"summary": "마감", "start_time": "2026-08-17 오후 04:30:00"},
+            {"summary": "오픈", "start_time": "2026-08-18 오전 11:00:00"},
+            {"summary": "휴무", "start_time": "2026-08-19 오전 09:00:00"},
+        ],
+    }
 
 @pytest.mark.asyncio
 @patch("main.classify_image_intent")
