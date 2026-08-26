@@ -16,6 +16,7 @@ struct NativeGoogleAuthGate: View {
             }
         }
         .task {
+            print("ARCUS Web base URL: \(ArcusWebConfig.appBaseURL.absoluteString)")
             await restoreExistingSignInIfPossible()
         }
     }

@@ -2,10 +2,31 @@ import SwiftUI
 import WebKit
 
 enum ArcusWebConfig {
+    #if DEBUG
+    private static let defaultAppBaseURLString = "http://127.0.0.1:3000"
+    #else
+    private static let defaultAppBaseURLString = "https://projectweb-beta-gilt.vercel.app"
+    #endif
+
     static var appBaseURL: URL {
-        guard let url = URL(string: "https://projectweb-beta-gilt.vercel.app/") else {
-            preconditionFailure("ArcusWebConfig.appBaseURL must be a valid HTTPS URL.")
+        #if DEBUG
+        let urlString = ProcessInfo.processInfo.environment["ARCUS_DEV_BASE_URL"] ?? defaultAppBaseURLString
+        #else
+        let urlString = defaultAppBaseURLString
+        #endif
+
+        guard let url = URL(string: urlString), let scheme = url.scheme, let host = url.host else {
+            preconditionFailure("ArcusWebConfig.appBaseURL must be a valid URL with scheme and host.")
         }
+
+        guard scheme == "https" || scheme == "http" else {
+            preconditionFailure("ArcusWebConfig.appBaseURL must use HTTP or HTTPS.")
+        }
+
+        guard !host.isEmpty else {
+            preconditionFailure("ArcusWebConfig.appBaseURL host must not be empty.")
+        }
+
         return url
     }
 

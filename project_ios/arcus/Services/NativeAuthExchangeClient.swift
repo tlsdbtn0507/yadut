@@ -46,6 +46,7 @@ struct NativeAuthExchangeClient {
     }
 
     func exchange(idToken: String) async throws -> String {
+        print("ARCUS native exchange URL: \(exchangeURL.absoluteString)")
         var request = URLRequest(url: exchangeURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

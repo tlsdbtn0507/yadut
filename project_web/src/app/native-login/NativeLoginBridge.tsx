@@ -3,7 +3,25 @@
 import { useEffect, useRef, useState } from 'react'
 import { signIn } from 'next-auth/react'
 
+import {
+  buildNativeLoginCallbackUrl,
+  getNativeLoginConsolePath,
+} from './nativeLoginRedirect'
+
 type BridgeStatus = 'connecting' | 'missing-code' | 'failed'
+
+function debugNativeLogin(message: string, data?: unknown): void {
+  if (process.env.NODE_ENV === 'production') {
+    return
+  }
+
+  if (data === undefined) {
+    console.log(`[native-login] ${message}`)
+    return
+  }
+
+  console.log(`[native-login] ${message}`, data)
+}
 
 export default function NativeLoginBridge() {
   const [status, setStatus] = useState<BridgeStatus>('connecting')
@@ -18,19 +36,40 @@ export default function NativeLoginBridge() {
     hasStarted.current = true
 
     async function connectNativeSession() {
+      debugNativeLogin('loaded', {
+        path: window.location.pathname,
+        host: window.location.host,
+      })
+
       const code = new URLSearchParams(window.location.search)
         .get('code')
         ?.trim()
 
       if (!code) {
+        debugNativeLogin('missing code')
         setStatus('missing-code')
         return
       }
 
+      debugNativeLogin('code received', {
+        length: code.length,
+        parts: code.split('.').length,
+      })
+      const callbackUrl = buildNativeLoginCallbackUrl(window.location.origin)
+      debugNativeLogin('signIn start', { callbackUrl })
+
       const response = await signIn('native-google', {
         code,
         redirect: false,
-        redirectTo: '/',
+        callbackUrl,
+      })
+
+      debugNativeLogin('signIn response', {
+        ok: response?.ok ?? null,
+        status: response?.status ?? null,
+        error: response?.error ?? null,
+        code: response?.code ?? null,
+        url: response?.url ?? null,
       })
 
       if (!response?.ok) {
@@ -39,10 +78,18 @@ export default function NativeLoginBridge() {
         return
       }
 
-      window.location.replace(response.url ?? '/')
+      const consolePath = getNativeLoginConsolePath()
+      debugNativeLogin('redirecting to console', {
+        responseUrl: response.url ?? null,
+        consolePath,
+      })
+      window.location.replace(consolePath)
     }
 
     connectNativeSession().catch((error: unknown) => {
+      debugNativeLogin('signIn threw', {
+        message: error instanceof Error ? error.message : 'native_sign_in_failed',
+      })
       setStatus('failed')
       setErrorMessage(
         error instanceof Error ? error.message : 'native_sign_in_failed',
