@@ -1,10 +1,16 @@
 'use client'
 
 import React, { useState, useRef, useEffect } from 'react'
-import { TelemetryMode, TelemetryStage, TelemetryEngine } from '../utils/telemetry'
+import {
+  getTelemetryStageForEvent,
+  TelemetryMode,
+  TelemetryStage,
+  TelemetryEngine,
+} from '../utils/telemetry'
 import { shouldSubmitChatKey } from '../utils/chatKeyboard'
 import { buildArcusPayload } from '../utils/arcusPayload'
 import { compressImageFile } from '../utils/imageCompression'
+import { type ArcusStreamEvent, readArcusStream } from '../utils/arcusStream'
 import styles from '../app/page.module.css'
 
 interface Message {
@@ -203,7 +209,33 @@ export default function ArcusConsole() {
     }
   }
 
-  // Send message action via real WebSocket direct link
+  const applyArcusEvent = (event: ArcusStreamEvent, time: string) => {
+    setTelemetryStage(getTelemetryStageForEvent(event.type))
+    setTelemetryLog(event.message)
+
+    if (event.type === 'completed') {
+      const message = event.result?.message ?? event.message
+      setMessages(prev => [...prev, {
+        id: `arcus-${Date.now()}`,
+        sender: 'arcus',
+        text: message,
+        time,
+        memoryUpdates: [],
+      }])
+    }
+
+    if (event.type === 'failed') {
+      setMessages(prev => [...prev, {
+        id: `arcus-${Date.now()}`,
+        sender: 'arcus',
+        text: event.message,
+        time,
+        memoryUpdates: [],
+      }])
+    }
+  }
+
+  // Send message through the authenticated BFF and reflect real ThinkPad events.
   const handleSend = async () => {
     if (!inputText.trim() && !stagedImage && !stagedFile) return
     if (isThinking) return
@@ -224,15 +256,15 @@ export default function ArcusConsole() {
     setInputText('')
     setIsThinking(true)
 
-    const isImageAttachment = !!stagedImage
     const savedStagedImage = stagedImage
 
     removeStaged()
-
-    await runThinkingSimulation(isImageAttachment)
+    setTelemetryStage(TelemetryStage.CLIENT_TX)
+    setTelemetryLog('요청을 씽크패드로 전송하고 있습니다.')
 
     try {
-      const response = await fetch('/api/arcus/message', {
+      let receivedTerminalEvent = false
+      const response = await fetch('/api/arcus/message/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -244,25 +276,21 @@ export default function ArcusConsole() {
           }),
         ),
       })
-      const res = await response.json()
-
-      if (!response.ok || !res.success) {
-        throw new Error(res.error_code ? getArcusErrorMessage(res.error_code) : res.error || 'ThinkPad bridge request failed')
+      await readArcusStream(response, (event) => {
+        if (event.type === 'completed' || event.type === 'failed') {
+          receivedTerminalEvent = true
+        }
+        applyArcusEvent(event, timeString)
+      })
+      if (!receivedTerminalEvent) {
+        throw new Error('ARCUS stream ended before a terminal event')
       }
-
-      const arcusMessage: Message = {
-        id: `arcus-${Date.now()}`,
-        sender: 'arcus',
-        text: res.message,
-        time: timeString,
-        memoryUpdates: []
-      }
-      setMessages(prev => [...prev, arcusMessage])
     } catch (err: unknown) {
+      console.error('ARCUS stream failed:', err)
       const arcusMessage: Message = {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
-        text: `죄송합니다, 마스터. 씽크패드 브리지 전송 중 오류가 발생했습니다: ${getArcusErrorMessage(err)}`,
+        text: '죄송합니다, 마스터. 요청 처리 상태 연결이 끊겼습니다. 다시 시도해 주십시오.',
         time: timeString,
         memoryUpdates: []
       }

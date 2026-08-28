@@ -8,11 +8,13 @@ import html
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import uvicorn
+
+from arcus_stream import ArcusProcessingError, EventEmitter, build_event, stream_events
 
 # 터미널 환경에 상관없이 .env 파일 자동 로드
 load_dotenv()
@@ -34,6 +36,17 @@ IMAGE_INTENT_CLARIFY_MESSAGE = (
 )
 SCHEDULE_TARGET_KEYWORDS = ("캘린더", "일정", "스케줄", "근무표", "시간표")
 SCHEDULE_ACTION_KEYWORDS = ("넣어", "등록", "추가", "동기화", "반영")
+TEXT_ACTION_MESSAGES = {
+    "NONE": "답변을 준비하고 있습니다.",
+    "CLARIFY": "요청을 진행하려면 추가 설명이 필요합니다.",
+    "WEB_SEARCH": "웹 검색이 필요한 요청으로 파악했습니다.",
+}
+IMAGE_ERROR_MESSAGES = {
+    "thinkpad_processing": "이미지 요청을 처리하지 못했습니다. 다시 시도해 주십시오.",
+    "macbook_upload": "이미지 업로드에 실패했습니다. 다시 시도해 주십시오.",
+    "calendar_sync": "캘린더 일정 반영에 실패했습니다. 다시 시도해 주십시오.",
+    "image_analysis": "이미지 분석에 실패했습니다. 다시 시도해 주십시오.",
+}
 
 class ArcusMessageRequest(BaseModel):
     text: str = ""
@@ -278,6 +291,29 @@ async def handle_brain_decision(decision: dict, user_text: str) -> str:
 
     return message
 
+
+async def emit_if_present(
+    emit_event: EventEmitter | None,
+    event_type: str,
+    request_id: str,
+    message: str,
+    **extra: object,
+) -> None:
+    if emit_event:
+        await emit_event(build_event(event_type, request_id, message, **extra))
+
+
+def stream_failure_or_message(
+    emit_event: EventEmitter | None,
+    message: str,
+    error_code: str,
+    error_stage: str,
+    legacy_message: str,
+) -> str:
+    if emit_event:
+        raise ArcusProcessingError(message, error_code, error_stage)
+    return legacy_message
+
 async def process_arcus_message(
     text: str = "",
     attachment_type: str | None = None,
@@ -285,9 +321,23 @@ async def process_arcus_message(
     attachment_mime: str | None = None,
     attachment_name: str = "upload.jpg",
     message_id: str = "http",
+    emit_event: EventEmitter | None = None,
 ) -> str | dict[str, object]:
     if attachment_type == "image" and attachment_data:
+        await emit_if_present(
+            emit_event,
+            "thinkpad_processing",
+            message_id,
+            "이미지와 요청 내용을 파악하고 있습니다.",
+        )
         if not text.strip():
+            await emit_if_present(
+                emit_event,
+                "intent_identified",
+                message_id,
+                "요청을 진행하려면 추가 설명이 필요합니다.",
+                action="CLARIFY",
+            )
             return IMAGE_INTENT_CLARIFY_MESSAGE
 
         import base64
@@ -304,23 +354,58 @@ async def process_arcus_message(
         else:
             intent = await classify_image_intent(text, attachment_data, resolved_mime)
         logging.info(f"Image intent classified as: {intent}")
+        intent_message = (
+            "캘린더 일정 등록 요청으로 파악했습니다."
+            if intent == "SCHEDULE_SYNC"
+            else "이미지를 분석하는 요청으로 파악했습니다."
+        )
+        await emit_if_present(
+            emit_event,
+            "intent_identified",
+            message_id,
+            intent_message,
+            action=intent,
+        )
 
+        error_stage = "thinkpad_processing"
         try:
             temp_filename = f"schedule_{message_id}.jpg"
 
             async with httpx.AsyncClient(timeout=120.0) as client:
+                error_stage = "macbook_upload"
+                await emit_if_present(
+                    emit_event,
+                    "macbook_upload",
+                    message_id,
+                    "이미지를 분석 서버로 전달하고 있습니다.",
+                    action=intent,
+                )
                 files = {'file': (temp_filename, image_bytes, resolved_mime)}
                 upload_res = await client.post(f"{MACBOOK_URL}/upload", files=files)
                 upload_res.raise_for_status()
                 upload_data = upload_res.json()
 
                 if upload_data.get("status") != "success":
-                    return build_image_error_message("MACBOOK_UPLOAD_FAILED", upload_data.get("message"))
+                    return stream_failure_or_message(
+                        emit_event,
+                        "이미지 업로드에 실패했습니다. 다시 시도해 주십시오.",
+                        "image_upload_failed",
+                        "macbook_upload",
+                        build_image_error_message("MACBOOK_UPLOAD_FAILED", upload_data.get("message")),
+                    )
 
                 uploaded_filename = upload_data.get("filename")
 
                 if intent == "SCHEDULE_SYNC":
                     logging.info(f"Starting schedule sync for {uploaded_filename}...")
+                    error_stage = "calendar_sync"
+                    await emit_if_present(
+                        emit_event,
+                        "calendar_sync",
+                        message_id,
+                        "분석한 일정을 캘린더에 반영하고 있습니다.",
+                        action=intent,
+                    )
                     sync_res = await client.get(f"{MACBOOK_URL}/sync_calendar/{uploaded_filename}")
                     sync_res.raise_for_status()
                     sync_result = sync_res.json()
@@ -333,9 +418,23 @@ async def process_arcus_message(
                                 "schedules": schedules,
                             }
                         return sync_result.get("message", "마스터, 요청하신 캘린더 일정이 성공적으로 동기화되었습니다. 정상적으로 반영되었으니 캘린더를 확인해 주십시오!")
-                    return f"❌ 동기화 실패: {sync_result.get('message')}"
+                    return stream_failure_or_message(
+                        emit_event,
+                        "캘린더 일정 반영에 실패했습니다. 다시 시도해 주십시오.",
+                        "calendar_sync_failed",
+                        "calendar_sync",
+                        f"❌ 동기화 실패: {sync_result.get('message')}",
+                    )
 
                 logging.info(f"Starting multimodal image chat for {uploaded_filename}...")
+                error_stage = "image_analysis"
+                await emit_if_present(
+                    emit_event,
+                    "image_analysis",
+                    message_id,
+                    "이미지 내용을 분석하고 있습니다.",
+                    action=intent,
+                )
                 chat_files = {'file': (temp_filename, image_bytes, resolved_mime)}
                 chat_res = await client.post(
                     f"{MACBOOK_URL}/chat_with_image",
@@ -347,12 +446,58 @@ async def process_arcus_message(
 
                 if chat_result.get("status") == "success":
                     return chat_result.get("message")
-                return build_image_error_message("MACBOOK_IMAGE_CHAT_FAILED", chat_result.get("message"))
+                return stream_failure_or_message(
+                    emit_event,
+                    "이미지 분석에 실패했습니다. 다시 시도해 주십시오.",
+                    "image_analysis_failed",
+                    "image_analysis",
+                    build_image_error_message("MACBOOK_IMAGE_CHAT_FAILED", chat_result.get("message")),
+                )
+        except ArcusProcessingError:
+            raise
         except Exception as e:
             logging.error(f"Arcus image processing error: {e}")
+            if emit_event:
+                raise ArcusProcessingError(
+                    IMAGE_ERROR_MESSAGES[error_stage],
+                    "image_processing_failed",
+                    error_stage,
+                ) from e
             return build_image_error_message("THINKPAD_IMAGE_PROCESSING_FAILED", str(e))
 
+    await emit_if_present(
+        emit_event,
+        "thinkpad_processing",
+        message_id,
+        "요청 내용을 파악하고 있습니다.",
+    )
     decision = await ask_gemma_brain(text)
+    brain_message = str(decision.get("message", ""))
+    if emit_event and (
+        brain_message.startswith("ERROR_COMMUNICATION:")
+        or brain_message.startswith("에러:")
+    ):
+        raise ArcusProcessingError(
+            "요청 내용을 파악하지 못했습니다. 다시 시도해 주십시오.",
+            "brain_processing_failed",
+            "thinkpad_processing",
+        )
+    action = str(decision.get("action", "NONE"))
+    await emit_if_present(
+        emit_event,
+        "intent_identified",
+        message_id,
+        TEXT_ACTION_MESSAGES.get(action, "요청에 맞는 답변을 준비하고 있습니다."),
+        action=action,
+    )
+    if action == "WEB_SEARCH":
+        await emit_if_present(
+            emit_event,
+            "web_search",
+            message_id,
+            "관련 정보를 검색하고 있습니다.",
+            action=action,
+        )
     return await handle_brain_decision(decision, text)
 
 def parse_brain_response(raw_text: str) -> dict:
@@ -490,6 +635,36 @@ async def arcus_message_endpoint(
     if image_error:
         return JSONResponse(status_code=500, content=image_error)
     return {"success": True, "message": response}
+
+
+@app.post("/api/arcus/message/stream")
+async def arcus_message_stream_endpoint(
+    payload: ArcusMessageRequest,
+    authorization: str | None = Header(default=None),
+):
+    if not is_bridge_authorized(authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async def process(emit_event: EventEmitter) -> str | dict[str, object]:
+        return await process_arcus_message(
+            text=payload.text,
+            attachment_type=payload.attachment_type,
+            attachment_data=payload.attachment_data,
+            attachment_mime=payload.attachment_mime,
+            attachment_name=payload.attachment_name,
+            message_id=payload.message_id,
+            emit_event=emit_event,
+        )
+
+    return StreamingResponse(
+        stream_events(process, payload.message_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
