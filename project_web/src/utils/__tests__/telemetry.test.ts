@@ -1,7 +1,22 @@
 import { describe, it, expect } from 'vitest'
-import { TelemetryEngine, TelemetryMode, TelemetryStage } from '../telemetry'
+import {
+  getTelemetryStageForEvent,
+  TelemetryEngine,
+  TelemetryMode,
+  TelemetryStage,
+} from '../telemetry'
 
 describe('Telemetry Engine (TDD Step 3: Bifurcated 3-Node vs 5-Node Telemetry)', () => {
+  it('maps real server events to telemetry stages', () => {
+    expect(getTelemetryStageForEvent('accepted')).toBe(TelemetryStage.THINKPAD_GEMMA)
+    expect(getTelemetryStageForEvent('intent_identified')).toBe(TelemetryStage.THINKPAD_GEMMA)
+    expect(getTelemetryStageForEvent('macbook_upload')).toBe(TelemetryStage.MACBOOK_UPLOAD)
+    expect(getTelemetryStageForEvent('calendar_sync')).toBe(TelemetryStage.GEMINI_NEURAL)
+    expect(getTelemetryStageForEvent('image_analysis')).toBe(TelemetryStage.GEMINI_NEURAL)
+    expect(getTelemetryStageForEvent('completed')).toBe(TelemetryStage.RESPONSE_RX)
+    expect(getTelemetryStageForEvent('failed')).toBe(TelemetryStage.RESPONSE_RX)
+  })
+
   it('should initialize correctly for TEXT mode with 3 nodes and start at clientTx', () => {
     const engine = new TelemetryEngine(TelemetryMode.TEXT)
     

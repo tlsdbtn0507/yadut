@@ -243,80 +243,62 @@
   color: rgba(240, 243, 248, 0.95);
 }
 
-/* Dynamic 1-Line Thinking Console */
+/* Current request status */
 .thinkingContainer {
   align-self: flex-start;
   width: 90%;
-  background: rgba(4, 5, 8, 0.8);
-  border: 1px solid rgba(0, 243, 255, 0.08);
-  border-radius: 12px;
-  padding: 12px;
+  padding: 4px 2px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  animation: pulseOpacity 1.5s infinite alternate;
+  gap: 8px;
 }
 
-@keyframes pulseOpacity {
-  from { opacity: 0.85; }
-  to { opacity: 1; }
-}
-
-.thinkingTitleRow {
+.progressStatusRow {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
-  color: rgba(240, 243, 248, 0.7);
-  font-weight: 700;
 }
 
-.thinkingSpinner {
+.progressSpinner {
   width: 12px;
   height: 12px;
+  flex: 0 0 12px;
   border: 2px solid rgba(0, 243, 255, 0.2);
   border-top-color: #00f3ff;
   border-radius: 50%;
-  animation: spin 0.8s infinite linear;
+  animation: progressSpin 0.8s linear infinite;
 }
 
-@keyframes spin {
+@keyframes progressSpin {
   to { transform: rotate(360deg); }
+}
+
+.progressStatus {
+  margin: 0;
+  color: rgba(240, 243, 248, 0.82);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .progressLineContainer {
   width: 100%;
-  height: 2px;
-  background: rgba(240, 243, 248, 0.05);
-  border-radius: 1px;
+  height: 3px;
+  background: rgba(240, 243, 248, 0.08);
+  border-radius: 999px;
   overflow: hidden;
-  position: relative;
 }
 
 .progressLineGlow {
   height: 100%;
+  border-radius: inherit;
   transition: width 0.3s ease, background 0.3s ease;
   box-shadow: 0 0 6px #00f3ff;
 }
 
-.oneLineLog {
-  display: flex;
-  gap: 6px;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 10px;
-  color: #00f3ff;
-}
-
-.logPrompt {
-  color: #bd00ff;
-  font-weight: 700;
-}
-
-.logContent {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+@media (prefers-reduced-motion: reduce) {
+  .progressSpinner {
+    animation: none;
+  }
 }
 
 /* Floating Staged attachments preview bar above input */

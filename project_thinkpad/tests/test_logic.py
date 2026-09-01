@@ -91,6 +91,92 @@ async def test_process_arcus_message_text_uses_existing_brain_flow(mock_ask, moc
     mock_handle.assert_awaited_once_with({"message": "안녕하세요", "action": "NONE"}, "안녕")
     assert result == "안녕하세요"
 
+
+@pytest.mark.asyncio
+@patch("main.ask_gemma_brain")
+async def test_process_arcus_message_emits_text_intent(mock_ask):
+    from main import process_arcus_message
+
+    mock_ask.return_value = {"message": "안녕하세요", "action": "NONE"}
+    events = []
+
+    async def emit(event):
+        events.append(event)
+
+    result = await process_arcus_message(
+        text="안녕",
+        message_id="web-1",
+        emit_event=emit,
+    )
+
+    assert result == "안녕하세요"
+    assert [event["type"] for event in events] == [
+        "thinkpad_processing",
+        "intent_identified",
+    ]
+    assert events[-1]["action"] == "NONE"
+    assert events[-1]["message"] == "답변을 준비하고 있습니다."
+
+
+@pytest.mark.asyncio
+@patch("main.handle_brain_decision")
+@patch("main.ask_gemma_brain")
+async def test_process_arcus_message_emits_web_search_step(mock_ask, mock_handle):
+    from main import process_arcus_message
+
+    mock_ask.return_value = {
+        "message": "검색하겠습니다.",
+        "action": "WEB_SEARCH",
+        "query": "서울 날씨",
+    }
+    mock_handle.return_value = "검색 결과입니다."
+    events = []
+
+    async def emit(event):
+        events.append(event)
+
+    await process_arcus_message(text="서울 날씨", message_id="web-search", emit_event=emit)
+
+    assert [event["type"] for event in events] == [
+        "thinkpad_processing",
+        "intent_identified",
+        "web_search",
+    ]
+    assert events[-1]["message"] == "관련 정보를 검색하고 있습니다."
+
+
+@pytest.mark.asyncio
+@patch("main.ask_gemma_brain")
+async def test_arcus_stream_hides_brain_failure_detail(mock_ask):
+    from arcus_stream import stream_events
+    from main import process_arcus_message
+
+    mock_ask.return_value = {
+        "message": "ERROR_COMMUNICATION: private brain detail",
+        "action": "NONE",
+    }
+
+    async def process(emit):
+        return await process_arcus_message(
+            text="안녕",
+            message_id="web-brain-fail",
+            emit_event=emit,
+        )
+
+    body = "".join([
+        chunk async for chunk in stream_events(process, "web-brain-fail")
+    ])
+    events = [
+        json.loads(frame.split("data: ", 1)[1])
+        for frame in body.split("\n\n")
+        if frame
+    ]
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error_code"] == "brain_processing_failed"
+    assert events[-1]["error_stage"] == "thinkpad_processing"
+    assert "private brain detail" not in events[-1]["message"]
+
 @pytest.mark.asyncio
 @patch("main.classify_image_intent")
 @patch("httpx.AsyncClient.post")
@@ -137,6 +223,49 @@ async def test_process_arcus_message_image_schedule_command_bypasses_llm_classif
             {"summary": "휴무", "start_time": "2026-08-19 오전 09:00:00"},
         ],
     }
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("httpx.AsyncClient.get")
+async def test_process_arcus_message_emits_schedule_steps(mock_get, mock_post):
+    from main import process_arcus_message
+    import base64
+
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_schedule_web.png",
+    }
+    mock_post.return_value = mock_upload_res
+
+    mock_sync_res = MagicMock()
+    mock_sync_res.json.return_value = {
+        "status": "success",
+        "message": "Calendar updated",
+    }
+    mock_get.return_value = mock_sync_res
+    events = []
+
+    async def emit(event):
+        events.append(event)
+
+    result = await process_arcus_message(
+        text="이 근무표를 캘린더에 등록해줘",
+        attachment_type="image",
+        attachment_data=base64.b64encode(b"image").decode("utf-8"),
+        message_id="web-schedule",
+        emit_event=emit,
+    )
+
+    assert result == "Calendar updated"
+    assert [event["type"] for event in events] == [
+        "thinkpad_processing",
+        "intent_identified",
+        "macbook_upload",
+        "calendar_sync",
+    ]
+    assert events[1]["action"] == "SCHEDULE_SYNC"
 
 @pytest.mark.asyncio
 @patch("main.classify_image_intent")
@@ -197,6 +326,198 @@ async def test_process_arcus_message_general_image_question_keeps_image_chat_flo
     assert mock_post.call_args_list[0][1]["files"]["file"][2] == "image/jpeg"
     assert mock_post.call_args_list[1][1]["files"]["file"][2] == "image/jpeg"
     assert result == "사진 설명입니다."
+
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_process_arcus_message_emits_image_analysis_step(mock_post, mock_classify):
+    from main import process_arcus_message
+    import base64
+
+    mock_classify.return_value = "IMAGE_CHAT"
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_image_chat.png",
+    }
+    mock_chat_res = MagicMock()
+    mock_chat_res.json.return_value = {
+        "status": "success",
+        "message": "사진 설명입니다.",
+    }
+    mock_post.side_effect = [mock_upload_res, mock_chat_res]
+    events = []
+
+    async def emit(event):
+        events.append(event)
+
+    await process_arcus_message(
+        text="이 사진은 뭐야?",
+        attachment_type="image",
+        attachment_data=base64.b64encode(b"image").decode("utf-8"),
+        message_id="web-image",
+        emit_event=emit,
+    )
+
+    assert [event["type"] for event in events] == [
+        "thinkpad_processing",
+        "intent_identified",
+        "macbook_upload",
+        "image_analysis",
+    ]
+    assert events[-1]["message"] == "이미지 내용을 분석하고 있습니다."
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_arcus_stream_reports_image_upload_failure_as_failed(mock_post):
+    from arcus_stream import stream_events
+    from main import process_arcus_message
+    import base64
+
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "error",
+        "message": "private upload detail",
+    }
+    mock_post.return_value = mock_upload_res
+
+    async def process(emit):
+        return await process_arcus_message(
+            text="이 근무표를 캘린더에 등록해줘",
+            attachment_type="image",
+            attachment_data=base64.b64encode(b"image").decode("utf-8"),
+            message_id="web-upload-fail",
+            emit_event=emit,
+        )
+
+    body = "".join([
+        chunk async for chunk in stream_events(process, "web-upload-fail")
+    ])
+    events = [
+        json.loads(frame.split("data: ", 1)[1])
+        for frame in body.split("\n\n")
+        if frame
+    ]
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error_code"] == "image_upload_failed"
+    assert events[-1]["error_stage"] == "macbook_upload"
+    assert "private upload detail" not in events[-1]["message"]
+    assert not any(event["type"] == "completed" for event in events)
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_arcus_stream_hides_network_error_and_reports_current_stage(mock_post):
+    from arcus_stream import stream_events
+    from main import process_arcus_message
+    import base64
+
+    mock_post.side_effect = RuntimeError("private network detail")
+
+    async def process(emit):
+        return await process_arcus_message(
+            text="이 근무표를 캘린더에 등록해줘",
+            attachment_type="image",
+            attachment_data=base64.b64encode(b"image").decode("utf-8"),
+            message_id="web-network-fail",
+            emit_event=emit,
+        )
+
+    body = "".join([
+        chunk async for chunk in stream_events(process, "web-network-fail")
+    ])
+    events = [
+        json.loads(frame.split("data: ", 1)[1])
+        for frame in body.split("\n\n")
+        if frame
+    ]
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error_stage"] == "macbook_upload"
+    assert "private network detail" not in events[-1]["message"]
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("httpx.AsyncClient.get")
+async def test_arcus_stream_reports_calendar_failure_stage(mock_get, mock_post):
+    from arcus_stream import stream_events
+    from main import process_arcus_message
+    import base64
+
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_schedule.png",
+    }
+    mock_post.return_value = mock_upload_res
+    mock_sync_res = MagicMock()
+    mock_sync_res.json.return_value = {
+        "status": "error",
+        "message": "private calendar detail",
+    }
+    mock_get.return_value = mock_sync_res
+
+    async def process(emit):
+        return await process_arcus_message(
+            text="이 근무표를 캘린더에 등록해줘",
+            attachment_type="image",
+            attachment_data=base64.b64encode(b"image").decode("utf-8"),
+            message_id="web-calendar-fail",
+            emit_event=emit,
+        )
+
+    body = "".join([
+        chunk async for chunk in stream_events(process, "web-calendar-fail")
+    ])
+    failed = json.loads(body.split("event: failed\ndata: ", 1)[1])
+
+    assert failed["error_code"] == "calendar_sync_failed"
+    assert failed["error_stage"] == "calendar_sync"
+    assert "private calendar detail" not in failed["message"]
+
+
+@pytest.mark.asyncio
+@patch("main.classify_image_intent")
+@patch("httpx.AsyncClient.post")
+async def test_arcus_stream_reports_image_analysis_failure_stage(mock_post, mock_classify):
+    from arcus_stream import stream_events
+    from main import process_arcus_message
+    import base64
+
+    mock_classify.return_value = "IMAGE_CHAT"
+    mock_upload_res = MagicMock()
+    mock_upload_res.json.return_value = {
+        "status": "success",
+        "filename": "remote_image.png",
+    }
+    mock_analysis_res = MagicMock()
+    mock_analysis_res.json.return_value = {
+        "status": "error",
+        "message": "private analysis detail",
+    }
+    mock_post.side_effect = [mock_upload_res, mock_analysis_res]
+
+    async def process(emit):
+        return await process_arcus_message(
+            text="이 사진은 뭐야?",
+            attachment_type="image",
+            attachment_data=base64.b64encode(b"image").decode("utf-8"),
+            message_id="web-analysis-fail",
+            emit_event=emit,
+        )
+
+    body = "".join([
+        chunk async for chunk in stream_events(process, "web-analysis-fail")
+    ])
+    failed = json.loads(body.split("event: failed\ndata: ", 1)[1])
+
+    assert failed["error_code"] == "image_analysis_failed"
+    assert failed["error_stage"] == "image_analysis"
+    assert "private analysis detail" not in failed["message"]
 
 @pytest.mark.asyncio
 @patch("main.classify_image_intent")
@@ -277,6 +598,59 @@ async def test_arcus_message_endpoint_requires_server_token(mock_process):
 
     assert result == {"success": True, "message": "응답"}
     mock_process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch.dict("os.environ", {"THINKPAD_BRIDGE_TOKEN": "SERVER_TOKEN"})
+@patch("main.process_arcus_message")
+async def test_arcus_stream_endpoint_emits_real_processing_order(mock_process):
+    from arcus_stream import build_event
+    from main import ArcusMessageRequest, arcus_message_stream_endpoint
+
+    async def process(**kwargs):
+        emit = kwargs["emit_event"]
+        await emit(
+            build_event(
+                "thinkpad_processing",
+                "web-1",
+                "요청 내용을 파악하고 있습니다.",
+            )
+        )
+        return "안녕하세요"
+
+    mock_process.side_effect = process
+    response = await arcus_message_stream_endpoint(
+        ArcusMessageRequest(text="안녕", message_id="web-1"),
+        authorization="Bearer SERVER_TOKEN",
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+    body = "".join(
+        chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+        for chunk in chunks
+    )
+
+    assert response.media_type == "text/event-stream"
+    assert [line for line in body.splitlines() if line.startswith("event: ")] == [
+        "event: accepted",
+        "event: thinkpad_processing",
+        "event: completed",
+    ]
+    assert '"result":{"message":"안녕하세요"}' in body
+
+
+@pytest.mark.asyncio
+@patch.dict("os.environ", {"THINKPAD_BRIDGE_TOKEN": "SERVER_TOKEN"})
+async def test_arcus_stream_endpoint_rejects_missing_token_before_stream():
+    from fastapi import HTTPException
+    from main import ArcusMessageRequest, arcus_message_stream_endpoint
+
+    with pytest.raises(HTTPException) as exc_info:
+        await arcus_message_stream_endpoint(
+            ArcusMessageRequest(text="안녕"),
+            authorization=None,
+        )
+
+    assert exc_info.value.status_code == 401
 
 @pytest.mark.asyncio
 @patch.dict("os.environ", {"WS_TOKEN": "SECRET_KEY"})

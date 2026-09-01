@@ -75,6 +75,7 @@ iPhone WebView / Safari / Desktop Browser
   - [x] ~~ThinkPad 서버 재시작 후 Funnel endpoint 실요청 검증~~
   - [x] ~~맥북 화면 캡처~~
   - [x] ~~이미지 기반 캘린더 등록~~
+  - [x] ~~일정 동기화 결과를 날짜·근무유형별로 아르커스 응답에 표시~~
 - [ ] iOS 앱:
   - [x] ~~WKWebView로 Vercel 앱 표시~~
   - [x] ~~네이티브 Google 로그인 후 Vercel 웹 세션 생성~~
@@ -93,17 +94,22 @@ iPhone WebView / Safari / Desktop Browser
 
 iOS WebView 기본 흐름과 이미지 첨부 안정화 직후 착수할 다음 우선순위 작업이다. 이미지 첨부 안정화에서 추가하는 `attachment_mime`, `error_code`, `error_stage`는 SSE 이벤트 payload에서도 재사용한다.
 
-- v1 HTTP API는 유지
-- 채팅/이미지 처리용 SSE endpoint 추가
-- 이벤트 예시:
+- [x] ~~v1 HTTP API 유지~~
+- [x] ~~채팅/이미지 처리용 SSE endpoint 추가~~
+- [x] ~~실제 처리 이벤트 연결:~~
   - `accepted`
   - `thinkpad_processing`
-  - `macbook_capture`
+  - `intent_identified`
+  - `web_search`
+  - `macbook_upload`
+  - `image_analysis`
   - `calendar_sync`
   - `completed`
   - `failed`
-- 현재 클라이언트 telemetry 애니메이션을 SSE 이벤트 기반으로 전환
-- SSE 실패 시 HTTP fallback 유지
+- [x] ~~클라이언트 telemetry를 실제 SSE 이벤트와 사용자용 한국어 상태 기반으로 전환~~
+- [x] ~~ThinkPad가 처리 시작 전 SSE 미지원을 명시한 경우 기존 HTTP API fallback 유지~~
+
+화면 캡처 버튼과 `/api/capture`는 이번 SSE 범위에서 제외한다.
 
 ## v2: iOS 백그라운드 작업 복구
 

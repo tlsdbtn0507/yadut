@@ -1,3 +1,5 @@
+import type { ArcusStreamEventType } from './arcusStream'
+
 export enum TelemetryMode {
   TEXT = 'TEXT',
   IMAGE = 'IMAGE'
@@ -9,6 +11,26 @@ export enum TelemetryStage {
   MACBOOK_UPLOAD = 'MACBOOK_UPLOAD',
   GEMINI_NEURAL = 'GEMINI_NEURAL',
   RESPONSE_RX = 'RESPONSE_RX'
+}
+
+export function getTelemetryStageForEvent(
+  eventType: ArcusStreamEventType,
+): TelemetryStage {
+  switch (eventType) {
+    case 'macbook_upload':
+      return TelemetryStage.MACBOOK_UPLOAD
+    case 'image_analysis':
+    case 'calendar_sync':
+      return TelemetryStage.GEMINI_NEURAL
+    case 'completed':
+    case 'failed':
+      return TelemetryStage.RESPONSE_RX
+    case 'accepted':
+    case 'thinkpad_processing':
+    case 'intent_identified':
+    case 'web_search':
+      return TelemetryStage.THINKPAD_GEMMA
+  }
 }
 
 export class TelemetryEngine {
