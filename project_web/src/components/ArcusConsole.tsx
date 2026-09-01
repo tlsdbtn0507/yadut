@@ -11,6 +11,7 @@ import { shouldSubmitChatKey } from '../utils/chatKeyboard'
 import { buildArcusPayload } from '../utils/arcusPayload'
 import { compressImageFile } from '../utils/imageCompression'
 import { type ArcusStreamEvent, readArcusStream } from '../utils/arcusStream'
+import { formatScheduleMessage } from '../utils/scheduleMessage'
 import styles from '../app/page.module.css'
 
 interface Message {
@@ -214,7 +215,9 @@ export default function ArcusConsole() {
     setTelemetryLog(event.message)
 
     if (event.type === 'completed') {
-      const message = event.result?.message ?? event.message
+      const message = formatScheduleMessage(event.result?.schedules)
+        ?? event.result?.message
+        ?? event.message
       setMessages(prev => [...prev, {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
@@ -387,6 +390,12 @@ export default function ArcusConsole() {
     }
   }
 
+  const progressValue = telemetryStage === TelemetryStage.CLIENT_TX ? 20
+    : telemetryStage === TelemetryStage.THINKPAD_GEMMA ? 40
+      : telemetryStage === TelemetryStage.MACBOOK_UPLOAD ? 60
+        : telemetryStage === TelemetryStage.GEMINI_NEURAL ? 80
+          : 100
+
   return (
     <div className={styles.chatContainer}>
       
@@ -460,32 +469,32 @@ export default function ArcusConsole() {
           )
         })}
 
-        {/* Dynamic Thinking Progress Box */}
+        {/* Current server-reported status and progress */}
         {isThinking && (
           <div className={styles.thinkingContainer}>
-            <div className={styles.thinkingTitleRow}>
-              <div className={styles.thinkingSpinner} />
-              <span>아르커스 연산 사유 엔진 분석 중...</span>
+            <div
+              className={styles.progressStatusRow}
+              role="status"
+              aria-label={telemetryLog}
+            >
+              <span className={styles.progressSpinner} aria-hidden="true" />
+              <p className={styles.progressStatus}>{telemetryLog}</p>
             </div>
-            
-            {/* 1-Line Progress Bar Line */}
-            <div className={styles.progressLineContainer}>
+            <div
+              className={styles.progressLineContainer}
+              role="progressbar"
+              aria-label="요청 처리 진행률"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progressValue}
+            >
               <div 
                 className={styles.progressLineGlow} 
                 style={{
-                  width: telemetryStage === TelemetryStage.CLIENT_TX ? '20%' :
-                         telemetryStage === TelemetryStage.THINKPAD_GEMMA ? '40%' :
-                         telemetryStage === TelemetryStage.MACBOOK_UPLOAD ? '60%' :
-                         telemetryStage === TelemetryStage.GEMINI_NEURAL ? '80%' : '100%',
+                  width: `${progressValue}%`,
                   background: telemetryStage === TelemetryStage.RESPONSE_RX ? 'linear-gradient(90deg, #bd00ff, #00f3ff)' : '#00f3ff'
                 }}
               />
-            </div>
-
-            {/* 1-Line Cyber log text */}
-            <div className={styles.oneLineLog}>
-              <span className={styles.logPrompt}>&gt;</span>
-              <span className={styles.logContent}>{telemetryLog}</span>
             </div>
           </div>
         )}

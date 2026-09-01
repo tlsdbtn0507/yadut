@@ -59,11 +59,16 @@ async function getFallbackResponse(upstream: Response, body: object): Promise<Re
     getThinkPadEndpoint('/api/arcus/message'),
     getThinkPadRequest(body),
   )
-  const data = await fallback.json() as { success?: boolean; message?: string; error?: string }
+  const data = await fallback.json() as {
+    success?: boolean
+    message?: string
+    error?: string
+    schedules?: unknown
+  }
   const succeeded = fallback.ok && data.success !== false
   const message = data.message ?? data.error ?? '요청 처리에 실패했습니다.'
   const event = succeeded
-    ? { type: 'completed', message, result: { message } }
+    ? { type: 'completed', message, result: { message, schedules: data.schedules } }
     : { type: 'failed', message }
   const frame = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
 

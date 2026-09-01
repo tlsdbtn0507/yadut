@@ -91,6 +91,37 @@ describe('/api/arcus/message/stream', () => {
     expect(body).toContain('"message":"기존 HTTP 응답입니다."')
   })
 
+  it('preserves schedules when falling back to the HTTP endpoint', async () => {
+    process.env = {
+      ...originalEnv,
+      THINKPAD_FUNNEL_URL: 'https://thinkpad.example.com',
+      THINKPAD_BRIDGE_TOKEN: 'SERVER_TOKEN',
+    }
+    const schedules = [
+      {
+        start_time: '2026-08-29 07:00:00',
+        end_time: '2026-08-29 15:00:00',
+        summary: '오픈',
+      },
+    ]
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 501 }))
+      .mockResolvedValueOnce(Response.json({
+        success: true,
+        message: '캘린더 동기화 완료',
+        schedules,
+      })) as typeof fetch
+
+    const response = await POST(new Request('http://localhost/api/arcus/message/stream', {
+      method: 'POST',
+      body: JSON.stringify({ text: '근무표 등록', message_id: 'web-schedule' }),
+    }))
+    const frame = await response.text()
+    const event = JSON.parse(frame.split('data: ', 2)[1])
+
+    expect(event.result.schedules).toEqual(schedules)
+  })
+
   it('does not retry an ambiguous ThinkPad processing failure', async () => {
     process.env = {
       ...originalEnv,

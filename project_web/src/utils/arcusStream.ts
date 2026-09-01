@@ -14,7 +14,7 @@ export interface ArcusStreamEvent {
   request_id?: string
   message: string
   action?: string
-  result?: { message?: string }
+  result?: { message?: string; schedules?: unknown }
   error_code?: string
   error_stage?: string
 }
