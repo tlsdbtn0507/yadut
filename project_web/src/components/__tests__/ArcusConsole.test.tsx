@@ -92,7 +92,7 @@ describe('ArcusConsole SSE processing status', () => {
     fireEvent.click(screen.getByRole('button', { name: '▲' }))
 
     expect(await screen.findByText(
-      '죄송합니다, 마스터. 요청 처리 상태 연결이 끊겼습니다. 다시 시도해 주십시오.',
+      '씽크패드에서 요청을 분석하는 중 오류가 발생했습니다.',
     )).toBeInTheDocument()
   })
 
@@ -123,5 +123,82 @@ describe('ArcusConsole SSE processing status', () => {
       (_, element) => element?.textContent === expected,
       { selector: 'p' },
     )).toBeInTheDocument()
+  })
+
+  it.each([
+    ['bff_to_thinkpad', '씽크패드 서버에 연결하지 못했습니다. 서버 상태를 확인해 주세요.'],
+    ['thinkpad_processing', '씽크패드에서 요청을 분석하는 중 오류가 발생했습니다.'],
+    ['web_search', '웹 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'],
+    ['macbook_upload', '맥북 서버로 이미지를 전달하는 중 오류가 발생했습니다.'],
+    ['image_analysis', '맥북에서 이미지를 분석하는 중 오류가 발생했습니다.'],
+    ['calendar_sync', '맥북 캘린더에 일정을 반영하는 중 오류가 발생했습니다.'],
+  ])('shows a user-facing error for the %s stage', async (errorStage, expected) => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `event: failed\ndata: {"type":"failed","message":"private upstream detail","error_code":"internal_code","error_stage":"${errorStage}"}\n\n`,
+        ))
+        controller.close()
+      },
+    })
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ authenticated: true, transport: 'bff_pending' }))
+      .mockResolvedValueOnce(new Response(stream)) as typeof fetch
+
+    render(<ArcusConsole />)
+    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+      target: { value: '요청' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+
+    expect(await screen.findByText(expected)).toBeInTheDocument()
+    expect(screen.queryByText('private upstream detail')).not.toBeInTheDocument()
+    expect(screen.queryByText('internal_code')).not.toBeInTheDocument()
+  })
+
+  it('reports the Arcus request server when the browser request fails', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ authenticated: true, transport: 'bff_pending' }))
+      .mockRejectedValueOnce(new Error('private network detail')) as typeof fetch
+
+    render(<ArcusConsole />)
+    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+      target: { value: '안녕' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+
+    expect(await screen.findByText(
+      '아르커스 요청 서버에 연결하지 못했습니다. 네트워크 상태를 확인해 주세요.',
+    )).toBeInTheDocument()
+    expect(screen.queryByText('private network detail')).not.toBeInTheDocument()
+  })
+
+  it('uses the last SSE stage when the stream disconnects', async () => {
+    let readCount = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (readCount++ === 0) {
+          controller.enqueue(encoder.encode(
+            'event: macbook_upload\ndata: {"type":"macbook_upload","message":"이미지를 전달하고 있습니다."}\n\n',
+          ))
+          return
+        }
+        controller.error(new Error('private stream detail'))
+      },
+    })
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ authenticated: true, transport: 'bff_pending' }))
+      .mockResolvedValueOnce(new Response(stream)) as typeof fetch
+
+    render(<ArcusConsole />)
+    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+      target: { value: '사진 분석' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+
+    expect(await screen.findByText(
+      '맥북 서버로 이미지를 전달하는 중 오류가 발생했습니다.',
+    )).toBeInTheDocument()
+    expect(screen.queryByText('private stream detail')).not.toBeInTheDocument()
   })
 })

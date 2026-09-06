@@ -108,6 +108,7 @@ iOS WebView 기본 흐름과 이미지 첨부 안정화 직후 착수할 다음 
   - `failed`
 - [x] ~~클라이언트 telemetry를 실제 SSE 이벤트와 사용자용 한국어 상태 기반으로 전환~~
 - [x] ~~ThinkPad가 처리 시작 전 SSE 미지원을 명시한 경우 기존 HTTP API fallback 유지~~
+- [x] ~~SSE 실패 단계와 연결 중단 위치를 사용자용 한국어 오류로 최종 표시~~
 
 화면 캡처 버튼과 `/api/capture`는 이번 SSE 범위에서 제외한다.
 

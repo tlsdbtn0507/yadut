@@ -135,9 +135,93 @@ describe('/api/arcus/message/stream', () => {
       method: 'POST',
       body: JSON.stringify({ text: '안녕', message_id: 'web-no-retry' }),
     }))
+    const event = JSON.parse((await response.text()).split('data: ', 2)[1])
 
-    expect(response.status).toBe(500)
+    expect(response.status).toBe(200)
+    expect(event).toMatchObject({
+      type: 'failed',
+      error_code: 'thinkpad_request_failed',
+      error_stage: 'thinkpad_processing',
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns a safe failed event when ThinkPad is unreachable', async () => {
+    process.env = {
+      ...originalEnv,
+      THINKPAD_FUNNEL_URL: 'https://thinkpad.example.com',
+      THINKPAD_BRIDGE_TOKEN: 'SERVER_TOKEN',
+    }
+    global.fetch = vi.fn().mockRejectedValue(new Error('private socket detail')) as typeof fetch
+
+    const response = await POST(new Request('http://localhost/api/arcus/message/stream', {
+      method: 'POST',
+      body: JSON.stringify({ text: '안녕', message_id: 'web-offline' }),
+    }))
+    const body = await response.text()
+    const event = JSON.parse(body.split('data: ', 2)[1])
+
+    expect(response.status).toBe(200)
+    expect(event).toEqual({
+      type: 'failed',
+      message: '씽크패드 서버에 연결하지 못했습니다.',
+      error_code: 'thinkpad_unreachable',
+      error_stage: 'bff_to_thinkpad',
+    })
+    expect(body).not.toContain('private socket detail')
+  })
+
+  it('preserves error location when the HTTP fallback fails', async () => {
+    process.env = {
+      ...originalEnv,
+      THINKPAD_FUNNEL_URL: 'https://thinkpad.example.com',
+      THINKPAD_BRIDGE_TOKEN: 'SERVER_TOKEN',
+    }
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 501 }))
+      .mockResolvedValueOnce(Response.json({
+        success: false,
+        error: '이미지 업로드 실패',
+        error_code: 'MACBOOK_UPLOAD_FAILED',
+        error_stage: 'macbook_upload',
+      }, { status: 500 })) as typeof fetch
+
+    const response = await POST(new Request('http://localhost/api/arcus/message/stream', {
+      method: 'POST',
+      body: JSON.stringify({ text: '사진 분석', message_id: 'web-fallback-error' }),
+    }))
+    const event = JSON.parse((await response.text()).split('data: ', 2)[1])
+
+    expect(event).toMatchObject({
+      type: 'failed',
+      error_code: 'MACBOOK_UPLOAD_FAILED',
+      error_stage: 'macbook_upload',
+    })
+  })
+
+  it('reports ThinkPad connectivity when the HTTP fallback cannot connect', async () => {
+    process.env = {
+      ...originalEnv,
+      THINKPAD_FUNNEL_URL: 'https://thinkpad.example.com',
+      THINKPAD_BRIDGE_TOKEN: 'SERVER_TOKEN',
+    }
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 501 }))
+      .mockRejectedValueOnce(new Error('private fallback socket detail')) as typeof fetch
+
+    const response = await POST(new Request('http://localhost/api/arcus/message/stream', {
+      method: 'POST',
+      body: JSON.stringify({ text: '안녕', message_id: 'web-fallback-offline' }),
+    }))
+    const body = await response.text()
+    const event = JSON.parse(body.split('data: ', 2)[1])
+
+    expect(event).toMatchObject({
+      type: 'failed',
+      error_code: 'thinkpad_unreachable',
+      error_stage: 'bff_to_thinkpad',
+    })
+    expect(body).not.toContain('private fallback socket detail')
   })
 
   it('rejects unauthenticated requests before contacting ThinkPad', async () => {
