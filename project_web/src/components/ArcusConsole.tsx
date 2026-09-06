@@ -11,6 +11,7 @@ import { shouldSubmitChatKey } from '../utils/chatKeyboard'
 import { buildArcusPayload } from '../utils/arcusPayload'
 import { compressImageFile } from '../utils/imageCompression'
 import { type ArcusStreamEvent, readArcusStream } from '../utils/arcusStream'
+import { getArcusFailureMessage } from '../utils/arcusError'
 import { formatScheduleMessage } from '../utils/scheduleMessage'
 import styles from '../app/page.module.css'
 
@@ -212,7 +213,10 @@ export default function ArcusConsole() {
 
   const applyArcusEvent = (event: ArcusStreamEvent, time: string) => {
     setTelemetryStage(getTelemetryStageForEvent(event.type))
-    setTelemetryLog(event.message)
+    const failureMessage = event.type === 'failed'
+      ? getArcusFailureMessage(event.error_stage, event.type)
+      : null
+    setTelemetryLog(failureMessage ?? event.message)
 
     if (event.type === 'completed') {
       const message = formatScheduleMessage(event.result?.schedules)
@@ -231,7 +235,7 @@ export default function ArcusConsole() {
       setMessages(prev => [...prev, {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
-        text: event.message,
+        text: failureMessage ?? event.message,
         time,
         memoryUpdates: [],
       }])
@@ -264,6 +268,7 @@ export default function ArcusConsole() {
     removeStaged()
     setTelemetryStage(TelemetryStage.CLIENT_TX)
     setTelemetryLog('요청을 씽크패드로 전송하고 있습니다.')
+    let lastEventType: ArcusStreamEvent['type'] | 'client_to_bff' = 'client_to_bff'
 
     try {
       let receivedTerminalEvent = false
@@ -280,6 +285,7 @@ export default function ArcusConsole() {
         ),
       })
       await readArcusStream(response, (event) => {
+        lastEventType = event.type
         if (event.type === 'completed' || event.type === 'failed') {
           receivedTerminalEvent = true
         }
@@ -293,7 +299,7 @@ export default function ArcusConsole() {
       const arcusMessage: Message = {
         id: `arcus-${Date.now()}`,
         sender: 'arcus',
-        text: '죄송합니다, 마스터. 요청 처리 상태 연결이 끊겼습니다. 다시 시도해 주십시오.',
+        text: getArcusFailureMessage(undefined, lastEventType),
         time: timeString,
         memoryUpdates: []
       }

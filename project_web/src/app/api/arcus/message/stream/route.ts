@@ -19,6 +19,12 @@ const SSE_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 }
 
+function getFailedResponse(message: string, errorCode: string, errorStage: string): Response {
+  const event = { type: 'failed', message, error_code: errorCode, error_stage: errorStage }
+  const frame = `event: failed\ndata: ${JSON.stringify(event)}\n\n`
+  return new Response(frame, { status: 200, headers: SSE_HEADERS })
+}
+
 function getThinkPadEndpoint(path: string): string {
   const baseUrl = process.env.THINKPAD_FUNNEL_URL
   if (!baseUrl) throw new Error('THINKPAD_FUNNEL_URL is not configured')
@@ -55,21 +61,37 @@ function getThinkPadRequest(body: object): RequestInit {
 async function getFallbackResponse(upstream: Response, body: object): Promise<Response | null> {
   if (!SSE_UNSUPPORTED_STATUSES.has(upstream.status)) return null
 
-  const fallback = await fetch(
-    getThinkPadEndpoint('/api/arcus/message'),
-    getThinkPadRequest(body),
-  )
+  let fallback: Response
+  try {
+    fallback = await fetch(
+      getThinkPadEndpoint('/api/arcus/message'),
+      getThinkPadRequest(body),
+    )
+  } catch {
+    return getFailedResponse(
+      '씽크패드 서버에 연결하지 못했습니다.',
+      'thinkpad_unreachable',
+      'bff_to_thinkpad',
+    )
+  }
   const data = await fallback.json() as {
     success?: boolean
     message?: string
     error?: string
     schedules?: unknown
+    error_code?: string
+    error_stage?: string
   }
   const succeeded = fallback.ok && data.success !== false
   const message = data.message ?? data.error ?? '요청 처리에 실패했습니다.'
   const event = succeeded
     ? { type: 'completed', message, result: { message, schedules: data.schedules } }
-    : { type: 'failed', message }
+    : {
+        type: 'failed',
+        message,
+        error_code: data.error_code ?? 'thinkpad_request_failed',
+        error_stage: data.error_stage ?? 'thinkpad_processing',
+      }
   const frame = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
 
   return new Response(frame, { status: 200, headers: SSE_HEADERS })
@@ -83,17 +105,27 @@ export async function POST(request: Request) {
 
   try {
     const body = normalizePayload(await request.json() as ArcusMessagePayload)
-    const upstream = await fetch(
-      getThinkPadEndpoint('/api/arcus/message/stream'),
-      getThinkPadRequest(body),
-    )
+    let upstream: Response
+    try {
+      upstream = await fetch(
+        getThinkPadEndpoint('/api/arcus/message/stream'),
+        getThinkPadRequest(body),
+      )
+    } catch {
+      return getFailedResponse(
+        '씽크패드 서버에 연결하지 못했습니다.',
+        'thinkpad_unreachable',
+        'bff_to_thinkpad',
+      )
+    }
     const fallback = await getFallbackResponse(upstream, body)
     if (fallback) return fallback
 
     if (!upstream.ok || !upstream.body) {
-      return NextResponse.json(
-        { success: false, error: `ThinkPad returned ${upstream.status}` },
-        { status: upstream.status || 502 },
+      return getFailedResponse(
+        '씽크패드에서 요청을 처리하지 못했습니다.',
+        'thinkpad_request_failed',
+        'thinkpad_processing',
       )
     }
 
