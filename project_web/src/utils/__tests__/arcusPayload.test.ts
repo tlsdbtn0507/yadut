@@ -12,7 +12,7 @@ describe('buildArcusPayload', () => {
       attachment_data: null,
       attachment_mime: null,
       attachment_name: 'upload.jpg',
-      message_id: expect.stringMatching(/^web-\d+$/),
+      message_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })
   })
 

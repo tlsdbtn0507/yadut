@@ -4,8 +4,11 @@ import { requireAllowedUser } from '@/auth/requireAllowedUser'
 import { getAuthFailure } from '@/auth/routeProtection'
 
 type ArcusMessagePayload = {
+  conversation_id?: string
+  attachment_ids?: string[]
   text?: string
   attachment_type?: string | null
+  attachment_mime?: string | null
   attachment_data?: string | null
   attachment_name?: string
   message_id?: string
@@ -14,7 +17,7 @@ type ArcusMessagePayload = {
 const SSE_UNSUPPORTED_STATUSES = new Set([404, 405, 415, 501])
 const SSE_HEADERS = {
   'Content-Type': 'text/event-stream; charset=utf-8',
-  'Cache-Control': 'no-cache, no-transform',
+  'Cache-Control': 'no-store, no-transform',
   'X-Accel-Buffering': 'no',
   'X-Content-Type-Options': 'nosniff',
 }
@@ -39,9 +42,12 @@ function getBridgeToken(): string {
 
 function normalizePayload(payload: ArcusMessagePayload) {
   return {
+    conversation_id: payload.conversation_id,
+    attachment_ids: payload.attachment_ids,
     text: payload.text ?? '',
     attachment_type: payload.attachment_type ?? null,
     attachment_data: payload.attachment_data ?? null,
+    attachment_mime: payload.attachment_mime ?? null,
     attachment_name: payload.attachment_name ?? 'upload.jpg',
     message_id: payload.message_id ?? `web-${Date.now()}`,
   }
@@ -59,6 +65,7 @@ function getThinkPadRequest(body: object): RequestInit {
 }
 
 async function getFallbackResponse(upstream: Response, body: object): Promise<Response | null> {
+  if ('conversation_id' in body && body.conversation_id) return null
   if (!SSE_UNSUPPORTED_STATUSES.has(upstream.status)) return null
 
   let fallback: Response
@@ -133,7 +140,7 @@ export async function POST(request: Request) {
       headers: SSE_HEADERS,
     })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'ThinkPad stream failed'
+    const message = error instanceof SyntaxError ? '잘못된 요청입니다.' : '요청 서버에 연결하지 못했습니다.'
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
 }

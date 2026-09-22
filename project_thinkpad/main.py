@@ -5,11 +5,19 @@ import logging
 import httpx
 import json
 import html
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+from fastapi.exceptions import RequestValidationError
+from routers.conversations import router, attachment_router, get_store, Identifier
+from services.conversation_store import ConversationStore, Conflict, configured_store
+from services.conversation_processing import claim_request, persistent_events
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import uvicorn
@@ -30,6 +38,9 @@ DEFAULT_ALLOWED_ORIGIN_REGEX = r"https://.*\.vercel\.app"
 # 로깅 설정
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 IMAGE_INTENT_CLARIFY_MESSAGE = (
     "마스터, 이미지를 확인했습니다. 이 이미지로 무엇을 도와드릴까요? "
     "일정 등록, 내용 분석, 요약 중 원하시는 작업을 말씀해 주십시오."
@@ -49,12 +60,21 @@ IMAGE_ERROR_MESSAGES = {
 }
 
 class ArcusMessageRequest(BaseModel):
-    text: str = ""
+    text: str = Field(default="", max_length=100_000)
     attachment_type: str | None = None
-    attachment_data: str | None = None
+    attachment_data: str | None = Field(default=None, max_length=4_000_000)
     attachment_mime: str | None = None
     attachment_name: str = "upload.jpg"
-    message_id: str = "http"
+    message_id: Identifier = "http"
+    conversation_id: Identifier | None = None
+    attachment_ids: list[Identifier] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode='after')
+    def require_persistent_id(self) -> 'ArcusMessageRequest':
+        if self.conversation_id and 'message_id' not in self.model_fields_set:
+            raise ValueError('Persistent messages require a client ID')
+        return self
+
 
 IMAGE_ERROR_DETAILS = {
     "IMAGE_DECODE_FAILED": {
@@ -229,12 +249,12 @@ async def search_web(query: str) -> list[dict]:
         if brave_results:
             return brave_results
     except Exception as error:
-        logging.warning(f"Brave search failed: {error}")
+        logging.warning("Brave search failed")
 
     try:
         return await search_duckduckgo(query)
     except Exception as error:
-        logging.warning(f"DuckDuckGo fallback failed: {error}")
+        logging.warning("DuckDuckGo search failed")
         return []
 
 async def ask_gemma_with_search_context(original_question: str, query: str, results: list[dict]) -> str:
@@ -272,7 +292,7 @@ async def ask_gemma_with_search_context(original_question: str, query: str, resu
                 return parsed["message"]
             return raw_content.strip()
         except Exception as error:
-            logging.error(f"Search summary error: {error}")
+            logging.error("Search summary failed")
             if not results:
                 return "죄송합니다, 마스터. 검색 결과를 가져오지 못했습니다."
             return f"마스터님, 검색은 완료했지만 최종 요약 중 오류가 발생했습니다.\n\n{format_search_results(results)}"
@@ -344,8 +364,11 @@ async def process_arcus_message(
         try:
             image_bytes = base64.b64decode(attachment_data, validate=True)
         except Exception as e:
-            logging.error(f"Arcus image decode error: {e}")
-            return build_image_error_message("IMAGE_DECODE_FAILED", str(e))
+            logging.error("Arcus image decode failed")
+            if emit_event:
+                raise ArcusProcessingError("이미지 데이터를 해석하지 못했습니다.",
+                                           "IMAGE_DECODE_FAILED", "thinkpad_image_decode") from e
+            return build_image_error_message("IMAGE_DECODE_FAILED")
 
         resolved_mime = attachment_mime or "image/jpeg"
 
@@ -397,7 +420,7 @@ async def process_arcus_message(
                 uploaded_filename = upload_data.get("filename")
 
                 if intent == "SCHEDULE_SYNC":
-                    logging.info(f"Starting schedule sync for {uploaded_filename}...")
+                    logging.info("Starting schedule sync")
                     error_stage = "calendar_sync"
                     await emit_if_present(
                         emit_event,
@@ -426,7 +449,7 @@ async def process_arcus_message(
                         f"❌ 동기화 실패: {sync_result.get('message')}",
                     )
 
-                logging.info(f"Starting multimodal image chat for {uploaded_filename}...")
+                logging.info("Starting image chat")
                 error_stage = "image_analysis"
                 await emit_if_present(
                     emit_event,
@@ -456,7 +479,7 @@ async def process_arcus_message(
         except ArcusProcessingError:
             raise
         except Exception as e:
-            logging.error(f"Arcus image processing error: {e}")
+            logging.error("Arcus image processing failed")
             if emit_event:
                 raise ArcusProcessingError(
                     IMAGE_ERROR_MESSAGES[error_stage],
@@ -591,11 +614,46 @@ async def classify_image_intent(user_text: str, base64_image: str, attachment_mi
                 return "IMAGE_CHAT"
                 
         except Exception as e:
-            logging.error(f"Gemma intent classification error: {e}")
+            logging.error("Gemma intent classification failed")
             # 에러 발생 시 안전하게 일반 사진 대화로 진행
             return "IMAGE_CHAT"
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    store = configured_store()
+    store.initialize()
+    store.recover_interrupted()
+    app.state.conversations = store
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(router)
+app.include_router(attachment_router)
+
+
+@app.middleware("http")
+async def private_responses(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.exception_handler(KeyError)
+async def missing_record(_request: Request, _error: KeyError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"error": "Not found"})
+
+
+@app.exception_handler(Conflict)
+async def conflicting_record(_request: Request, _error: Conflict) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"error": "Conflicting request"})
+
+
+@app.exception_handler(ValueError)
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request: Request, _error: Exception) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"error": "Invalid request"})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),
@@ -616,9 +674,23 @@ async def health():
 async def arcus_message_endpoint(
     payload: ArcusMessageRequest,
     authorization: str | None = Header(default=None),
+    store: ConversationStore = Depends(get_store),
 ):
     if not is_bridge_authorized(authorization):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if payload.conversation_id:
+        stream = await arcus_message_stream_endpoint(payload, authorization, store)
+        terminal = None
+        async for frame in stream.body_iterator:
+            value = json.loads(str(frame).split("data: ", 1)[1])
+            if value["type"] in ("completed", "failed"):
+                terminal = value
+        if terminal and terminal["type"] == "completed":
+            return {"success": True, **terminal["result"],
+                    "assistant_message_id": terminal["assistant_message_id"]}
+        return JSONResponse(status_code=500, content={"success": False,
+            "error": "요청 처리에 실패했습니다.", "error_code": (terminal or {}).get("error_code")})
 
     response = await process_arcus_message(
         text=payload.text,
@@ -641,11 +713,14 @@ async def arcus_message_endpoint(
 async def arcus_message_stream_endpoint(
     payload: ArcusMessageRequest,
     authorization: str | None = Header(default=None),
+    store: ConversationStore = Depends(get_store),
 ):
     if not is_bridge_authorized(authorization):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     async def process(emit_event: EventEmitter) -> str | dict[str, object]:
+        if payload.conversation_id and payload.attachment_ids and not payload.attachment_data:
+            return '첨부 원본을 저장했습니다. PDF·문서 내용 분석은 아직 지원하지 않습니다.'
         return await process_arcus_message(
             text=payload.text,
             attachment_type=payload.attachment_type,
@@ -656,8 +731,17 @@ async def arcus_message_stream_endpoint(
             emit_event=emit_event,
         )
 
+    events = stream_events(process, payload.message_id)
+    if payload.conversation_id:
+        if not payload.text.strip() and not payload.attachment_ids and not payload.attachment_data:
+            raise HTTPException(422, "Message is empty")
+        if payload.attachment_data and not payload.attachment_ids:
+            raise HTTPException(422, "Upload original attachment first")
+        saved = claim_request(store, payload.conversation_id, payload.message_id, payload.text,
+                              payload.attachment_ids, payload.model_dump())
+        events = persistent_events(store, saved, process)
     return StreamingResponse(
-        stream_events(process, payload.message_id),
+        events,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -693,7 +777,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=4003)
             return
     except Exception as e:
-        logging.warning(f"WebSocket authentication failed / timeout: {e}")
+        logging.warning("WebSocket authentication failed or timed out")
         await websocket.close(code=4003)
         return
     # -------------------------------------
@@ -702,7 +786,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # 앱이 보낸 텍스트/JSON 데이터 수신
             data = await websocket.receive_text()
-            logging.info(f"Received from WS: {data}")
+            logging.info("WebSocket message received")
             
             try:
                 message_json = json.loads(data)
@@ -729,7 +813,7 @@ async def websocket_endpoint(websocket: WebSocket):
             
             message = response_message["message"] if isinstance(response_message, dict) else response_message
             await websocket.send_text(str(message))
-            logging.info(f"Sent to WS: {message}")
+            logging.info("WebSocket response sent")
             
     except WebSocketDisconnect:
         logging.info("WebSocket disconnected from iOS app")

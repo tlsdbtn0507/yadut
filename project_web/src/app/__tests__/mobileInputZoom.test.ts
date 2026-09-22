@@ -27,33 +27,34 @@ describe('mobile viewport stability', () => {
 
   it('uses small viewport height fallback order for the fixed app shell', () => {
     const css = readCss('src/app/page.module.css')
-    const chatContainerRule = getRule(css, '.chatContainer')
+    const appShellRule = getRule(css, '.appShell')
 
-    expect(chatContainerRule).toContain('height: 100vh')
-    expect(chatContainerRule).toContain('height: 100svh')
-    expect(chatContainerRule!.indexOf('height: 100vh')).toBeLessThan(
-      chatContainerRule!.indexOf('height: 100svh'),
+    expect(appShellRule).toContain('height: 100vh')
+    expect(appShellRule).toContain('height: 100svh')
+    expect(appShellRule!.indexOf('height: 100vh')).toBeLessThan(
+      appShellRule!.indexOf('height: 100svh'),
     )
-    expect(chatContainerRule).toContain('display: flex')
-    expect(chatContainerRule).toContain('flex-direction: column')
-    expect(chatContainerRule).toContain('overflow: hidden')
+    expect(appShellRule).toContain('display: flex')
+    expect(appShellRule).toContain('flex-direction: column')
+    expect(appShellRule).toContain('overflow: hidden')
   })
 
   it('reserves iOS safe areas at the console shell boundary', () => {
     const css = readCss('src/app/page.module.css')
-    const chatContainerRule = getRule(css, '.chatContainer')
+    const headerRule = getRule(css, '.header')
+    const chatScreenRule = getRule(css, '.chatScreen')
 
-    expect(chatContainerRule).toContain('padding-top: env(safe-area-inset-top, 0px)')
-    expect(chatContainerRule).toContain('padding-bottom: env(safe-area-inset-bottom, 0px)')
+    expect(headerRule).toContain('env(safe-area-inset-top, 0px)')
+    expect(chatScreenRule).toContain('env(safe-area-inset-bottom, 0px)')
   })
 
   it('keeps only the message list scrollable inside the fixed shell', () => {
     const css = readCss('src/app/page.module.css')
-    const chatFlowRule = getRule(css, '.chatFlow')
+    const messageFlowRule = getRule(css, '.messageFlow')
 
-    expect(chatFlowRule).toContain('flex: 1 1 auto')
-    expect(chatFlowRule).toContain('min-height: 0')
-    expect(chatFlowRule).toContain('overflow-y: auto')
+    expect(messageFlowRule).toContain('flex: 1')
+    expect(messageFlowRule).toContain('min-height: 0')
+    expect(messageFlowRule).toContain('overflow-y: auto')
   })
 
   it('sets viewport-fit cover so WKWebView can expose safe-area env values', () => {

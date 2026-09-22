@@ -12,6 +12,9 @@ export type ArcusStreamEventType =
 export interface ArcusStreamEvent {
   type: ArcusStreamEventType
   request_id?: string
+  assistant_message_id?: string
+  conversation_id?: string
+  created_at?: string
   message: string
   action?: string
   result?: { message?: string; schedules?: unknown }

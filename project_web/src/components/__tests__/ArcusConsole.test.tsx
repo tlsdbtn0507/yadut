@@ -1,6 +1,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('../../utils/conversations', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/conversations')>()
+  return { ...actual, conversationRequest: vi.fn(async () => ({ id: 'test-conversation', title: '새 대화' })) }
+})
+
 import ArcusConsole from '../ArcusConsole'
 
 describe('ArcusConsole SSE processing status', () => {
@@ -28,20 +33,16 @@ describe('ArcusConsole SSE processing status', () => {
       },
     })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({
-        authenticated: true,
-        transport: 'bff_pending',
-      }))
       .mockResolvedValueOnce(new Response(stream, {
         headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
       }))
     global.fetch = fetchMock as typeof fetch
 
     render(<ArcusConsole />)
-    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+    fireEvent.change(screen.getByPlaceholderText('아르커스에게 물어보기'), {
       target: { value: '이 근무표를 등록해줘' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
 
     expect(await screen.findByText(
       '캘린더 일정 등록 요청으로 파악했습니다.',
@@ -64,7 +65,7 @@ describe('ArcusConsole SSE processing status', () => {
     streamController?.close()
 
     expect(await screen.findByText('일정 등록이 완료되었습니다.')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/arcus/message/stream', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/arcus/message/stream', expect.objectContaining({
       method: 'POST',
     }))
   }, 5000)
@@ -78,18 +79,13 @@ describe('ArcusConsole SSE processing status', () => {
         controller.close()
       },
     })
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json({
-        authenticated: true,
-        transport: 'bff_pending',
-      }))
-      .mockResolvedValueOnce(new Response(stream)) as typeof fetch
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response(stream)) as typeof fetch
 
     render(<ArcusConsole />)
-    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+    fireEvent.change(screen.getByPlaceholderText('아르커스에게 물어보기'), {
       target: { value: '안녕' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
 
     expect(await screen.findByText(
       '씽크패드에서 요청을 분석하는 중 오류가 발생했습니다.',
@@ -105,18 +101,13 @@ describe('ArcusConsole SSE processing status', () => {
         controller.close()
       },
     })
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json({
-        authenticated: true,
-        transport: 'bff_pending',
-      }))
-      .mockResolvedValueOnce(new Response(stream)) as typeof fetch
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response(stream)) as typeof fetch
 
     render(<ArcusConsole />)
-    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+    fireEvent.change(screen.getByPlaceholderText('아르커스에게 물어보기'), {
       target: { value: '이 근무표를 등록해줘' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
 
     const expected = '마스터, 스케줄 등록이 완료되었습니다.\n\n✅ 2026-08-29 오픈\n✅ 2026-08-30 휴무'
     expect(await screen.findByText(
@@ -141,15 +132,13 @@ describe('ArcusConsole SSE processing status', () => {
         controller.close()
       },
     })
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json({ authenticated: true, transport: 'bff_pending' }))
-      .mockResolvedValueOnce(new Response(stream)) as typeof fetch
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response(stream)) as typeof fetch
 
     render(<ArcusConsole />)
-    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+    fireEvent.change(screen.getByPlaceholderText('아르커스에게 물어보기'), {
       target: { value: '요청' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
 
     expect(await screen.findByText(expected)).toBeInTheDocument()
     expect(screen.queryByText('private upstream detail')).not.toBeInTheDocument()
@@ -157,15 +146,13 @@ describe('ArcusConsole SSE processing status', () => {
   })
 
   it('reports the Arcus request server when the browser request fails', async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json({ authenticated: true, transport: 'bff_pending' }))
-      .mockRejectedValueOnce(new Error('private network detail')) as typeof fetch
+    global.fetch = vi.fn().mockRejectedValueOnce(new Error('private network detail')) as typeof fetch
 
     render(<ArcusConsole />)
-    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+    fireEvent.change(screen.getByPlaceholderText('아르커스에게 물어보기'), {
       target: { value: '안녕' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
 
     expect(await screen.findByText(
       '아르커스 요청 서버에 연결하지 못했습니다. 네트워크 상태를 확인해 주세요.',
@@ -186,15 +173,13 @@ describe('ArcusConsole SSE processing status', () => {
         controller.error(new Error('private stream detail'))
       },
     })
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json({ authenticated: true, transport: 'bff_pending' }))
-      .mockResolvedValueOnce(new Response(stream)) as typeof fetch
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response(stream)) as typeof fetch
 
     render(<ArcusConsole />)
-    fireEvent.change(screen.getByPlaceholderText('마스터, 지시 사항을 입력하십시오...'), {
+    fireEvent.change(screen.getByPlaceholderText('아르커스에게 물어보기'), {
       target: { value: '사진 분석' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '▲' }))
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
 
     expect(await screen.findByText(
       '맥북 서버로 이미지를 전달하는 중 오류가 발생했습니다.',

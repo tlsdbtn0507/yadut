@@ -9,6 +9,9 @@ class ArcusEvent(TypedDict):
     type: str
     request_id: str
     message: str
+    conversation_id: NotRequired[str]
+    assistant_message_id: NotRequired[str]
+    created_at: NotRequired[str]
     action: NotRequired[str]
     result: NotRequired[dict[str, object]]
     error_code: NotRequired[str]

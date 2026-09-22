@@ -5,6 +5,8 @@ import { getAuthFailure } from '@/auth/routeProtection'
 import { formatScheduleMessage } from '@/utils/scheduleMessage'
 
 type ArcusMessagePayload = {
+  conversation_id?: string
+  attachment_ids?: string[]
   text?: string
   attachment_type?: string | null
   attachment_data?: string | null
@@ -72,7 +74,9 @@ export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as ArcusMessagePayload
     const body = {
-      text: payload.text ?? '',
+      conversation_id: payload.conversation_id,
+    attachment_ids: payload.attachment_ids,
+    text: payload.text ?? '',
       attachment_type: payload.attachment_type ?? null,
       attachment_data: payload.attachment_data ?? null,
       attachment_mime: payload.attachment_mime ?? null,
