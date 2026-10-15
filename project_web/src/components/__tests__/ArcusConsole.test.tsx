@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../utils/conversations', async (importOriginal) => {
@@ -69,6 +69,33 @@ describe('ArcusConsole SSE processing status', () => {
       method: 'POST',
     }))
   }, 5000)
+
+  it('submits completed Korean composition with one Enter press', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          'event: completed\ndata: {"type":"completed","message":"완료"}\n\n',
+        ))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(stream))
+    global.fetch = fetchMock as typeof fetch
+
+    render(<ArcusConsole />)
+    const composer = screen.getByPlaceholderText('아르커스에게 물어보기')
+    fireEvent.compositionStart(composer)
+    fireEvent.change(composer, { target: { value: '안녕' } })
+    expect(fireEvent.keyDown(composer, {
+      key: 'Enter', keyCode: 13, isComposing: true,
+    })).toBe(false)
+    fireEvent.compositionEnd(composer, { data: '녕', target: { value: '안녕' } })
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/arcus/message/stream', expect.any(Object),
+    ))
+    expect(screen.getByRole('heading', { name: '안녕' })).toBeInTheDocument()
+  })
 
   it('shows a Korean error when the stream ends without a terminal event', async () => {
     const stream = new ReadableStream<Uint8Array>({

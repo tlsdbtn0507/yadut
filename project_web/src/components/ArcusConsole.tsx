@@ -83,6 +83,7 @@ export default function ArcusConsole() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isComposingRef = useRef(false)
+  const submitAfterCompositionRef = useRef(false)
   const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -212,6 +213,12 @@ export default function ArcusConsole() {
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const composing = event.nativeEvent.isComposing || event.keyCode === 229 || isComposingRef.current
+    if (event.key === 'Enter' && !event.shiftKey && composing) {
+      event.preventDefault()
+      submitAfterCompositionRef.current = true
+      return
+    }
     if (!shouldSubmitChatKey({
       key: event.key,
       shiftKey: event.shiftKey,
@@ -278,8 +285,14 @@ export default function ArcusConsole() {
       inputText={inputText}
       isThinking={isThinking || restoring || preparingAttachment}
       onAttachment={() => fileInputRef.current?.click()}
-      onCompositionEnd={() => {
+      onCompositionEnd={(text) => {
         if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current)
+        if (submitAfterCompositionRef.current) {
+          submitAfterCompositionRef.current = false
+          isComposingRef.current = false
+          handleSend(text)
+          return
+        }
         compositionEndTimerRef.current = setTimeout(() => {
           isComposingRef.current = false
           compositionEndTimerRef.current = null
@@ -395,7 +408,7 @@ type ComposerProps = {
   onAttachment: () => void
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void
   onCompositionStart: () => void
-  onCompositionEnd: () => void
+  onCompositionEnd: (text: string) => void
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
   onRemoveStaged: () => void
   onSend: () => void
@@ -433,7 +446,7 @@ function Composer({
         aria-label="대화 입력"
         className={styles.textField}
         onChange={(event) => onInput(event.target.value)}
-        onCompositionEnd={onCompositionEnd}
+        onCompositionEnd={(event) => onCompositionEnd(event.currentTarget.value)}
         onCompositionStart={onCompositionStart}
         onKeyDown={onKeyDown}
         placeholder="아르커스에게 물어보기"
