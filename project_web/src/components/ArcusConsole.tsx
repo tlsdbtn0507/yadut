@@ -1,399 +1,276 @@
 'use client'
 
-import React, { useState, useRef, useEffect } from 'react'
-import {
-  getTelemetryStageForEvent,
-  TelemetryMode,
-  TelemetryStage,
-  TelemetryEngine,
-} from '../utils/telemetry'
-import { shouldSubmitChatKey } from '../utils/chatKeyboard'
-import { buildArcusPayload } from '../utils/arcusPayload'
-import { compressImageFile } from '../utils/imageCompression'
-import { type ArcusStreamEvent, readArcusStream } from '../utils/arcusStream'
-import { getArcusFailureMessage } from '../utils/arcusError'
-import { formatScheduleMessage } from '../utils/scheduleMessage'
-import styles from '../app/page.module.css'
+import Image from 'next/image'
+import { useEffect, useRef, useState } from 'react'
 
-interface Message {
+import styles from '../app/page.module.css'
+import { buildArcusPayload } from '../utils/arcusPayload'
+import { getArcusFailureMessage } from '../utils/arcusError'
+import { type ArcusStreamEvent, readArcusStream } from '../utils/arcusStream'
+import { shouldSubmitChatKey } from '../utils/chatKeyboard'
+import { compressImageFile } from '../utils/imageCompression'
+import { formatScheduleMessage } from '../utils/scheduleMessage'
+import { getTelemetryStageForEvent, TelemetryStage } from '../utils/telemetry'
+import YadutSidebar, { type ScreenName } from './YadutSidebar'
+import { useConversations } from '../hooks/useConversations'
+import { type Conversation, type ConversationDetail, type SavedMessage, conversationRequest, uploadOriginal } from '../utils/conversations'
+
+type Message = {
   id: string
   sender: 'user' | 'arcus'
   text: string
   time: string
   image?: string
   file?: string
-  memoryUpdates?: string[]
+  attachmentUrl?: string
+  failure?: string
 }
 
-interface RuntimeConfig {
-  authenticated: boolean
-  transport: 'bff_pending'
+const INITIAL_MESSAGES: Message[] = [{
+  id: 'welcome',
+  sender: 'arcus',
+  text: '안녕하세요. 오늘 필요한 일을 함께 정리해 볼까요?',
+  time: '',
+}]
+
+function displayTime(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
 }
 
-type BridgeStatus = 'checking' | 'bff_pending' | 'error'
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown error'
+function restoreMessage(message: SavedMessage): Message {
+  const attachment = message.attachments[0]
+  const url = attachment ? `/api/attachments/${attachment.id}` : undefined
+  return { id: message.id, sender: message.role === 'assistant' ? 'arcus' : 'user',
+    text: formatScheduleMessage(message.result?.schedules) ?? message.text, time: displayTime(message.created_at),
+    image: attachment?.kind === 'image' ? url : undefined,
+    file: attachment?.original_name, attachmentUrl: url,
+    failure: ['failed', 'interrupted'].includes(message.status)
+      ? getArcusFailureMessage(message.error_stage ?? undefined, 'failed')
+      : ['processing', 'queued'].includes(message.status) ? '아직 완료되지 않은 요청입니다. 대화를 다시 선택해 상태를 확인해 주세요.' : undefined,
+  }
 }
 
-function getArcusErrorMessage(error: unknown): string {
-  const message = getErrorMessage(error)
-  if (message === 'IMAGE_COMPRESS_FAILED') {
-    return '이미지를 전송 가능한 형식으로 변환하지 못했습니다.'
-  }
-  if (message === 'IMAGE_TOO_LARGE') {
-    return '이미지 용량이 너무 큽니다. 더 작은 사진으로 다시 시도해 주세요.'
-  }
-  if (message === 'THINKPAD_IMAGE_PROCESSING_FAILED') {
-    return 'ThinkPad 이미지 처리 중 오류가 발생했습니다.'
-  }
-  if (message === 'IMAGE_DECODE_FAILED') {
-    return '이미지 데이터를 해석하지 못했습니다. 다시 첨부해 주세요.'
-  }
-  if (message === 'MACBOOK_UPLOAD_FAILED') {
-    return 'MacBook 서버로 이미지를 업로드하지 못했습니다.'
-  }
-  if (message === 'MACBOOK_IMAGE_CHAT_FAILED') {
-    return 'MacBook 이미지 분석 중 오류가 발생했습니다.'
-  }
-  return message
-}
-
-async function loadRuntimeConfig(): Promise<RuntimeConfig> {
-  const response = await fetch('/api/runtime-config', { cache: 'no-store' })
-  if (!response.ok) {
-    throw new Error('Runtime config request failed')
-  }
-  return response.json() as Promise<RuntimeConfig>
+function currentTime(): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date())
 }
 
 export default function ArcusConsole() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'init-1',
-      sender: 'arcus',
-      text: '안녕하십니까, 마스터. 야두트 모바일 콘솔이 연동되었습니다. 씽크패드 브리지 및 맥북 서버가 대기 중입니다. 지시 사항을 입력해 주십시오.',
-      time: '17:50',
-      memoryUpdates: []
-    }
-  ])
-  
-  const [inputText, setInputText] = useState<string>('')
+  const history = useConversations()
+  const currentConversation = useRef<string | null>(null)
+  const selectionVersion = useRef(0)
+  const sending = useRef(false)
+  const [conversationError, setConversationError] = useState<string | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  const preparationVersion = useRef(0)
+  const [preparingAttachment, setPreparingAttachment] = useState(false)
+  const [originalFile, setOriginalFile] = useState<File | null>(null)
+  const [activeScreen, setActiveScreen] = useState<ScreenName>('home')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [threadTitle, setThreadTitle] = useState('새 대화')
+  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES)
+  const [inputText, setInputText] = useState('')
   const [stagedImage, setStagedImage] = useState<string | null>(null)
   const [stagedFile, setStagedFile] = useState<{ name: string; type: string } | null>(null)
-  
-  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('checking')
-
-  // Telemetry state inside thinking cycle
-  const [isThinking, setIsThinking] = useState<boolean>(false)
-  const [telemetryStage, setTelemetryStage] = useState<TelemetryStage>(TelemetryStage.CLIENT_TX)
-  const [telemetryLog, setTelemetryLog] = useState<string>('')
-
+  const [isThinking, setIsThinking] = useState(false)
+  const [telemetryStage, setTelemetryStage] = useState(TelemetryStage.CLIENT_TX)
+  const [telemetryLog, setTelemetryLog] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isComposingRef = useRef(false)
+  const submitAfterCompositionRef = useRef(false)
   const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Confirm the authenticated Vercel BFF is reachable without exposing bridge secrets.
-  useEffect(() => {
-    let isMounted = true
-
-    const loadConfig = async () => {
-      try {
-        const config = await loadRuntimeConfig()
-        if (!isMounted) return
-
-        setBridgeStatus(config.authenticated ? config.transport : 'error')
-      } catch (error) {
-        console.error('Runtime config load failed:', error)
-        setBridgeStatus('error')
-      }
-    }
-
-    loadConfig()
-
-    return () => {
-      isMounted = false
-    }
-  }, [])
-
-  // Scroll to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
 
-  // Textarea self-expanding layout (max 5 lines)
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
-    }
+    if (!textareaRef.current) return
+    textareaRef.current.style.height = 'auto'
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
   }, [inputText])
 
-  useEffect(() => {
-    return () => {
-      if (compositionEndTimerRef.current) {
-        clearTimeout(compositionEndTimerRef.current)
-      }
-    }
+  useEffect(() => () => {
+    if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current)
   }, [])
 
-  // Paperclip Action: Simulate attachments
-  const handleAttachmentClick = () => {
-    fileInputRef.current?.click()
-  }
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    if (file.type.startsWith('image/')) {
-      try {
-        const compressed = await compressImageFile(file)
-        setStagedImage(compressed.dataUrl)
-        setStagedFile(null)
-      } catch (error: unknown) {
-        const now = new Date()
-        const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-        const arcusMessage: Message = {
-          id: `arcus-${now.getTime()}`,
-          sender: 'arcus',
-          text: getArcusErrorMessage(error),
-          time: timeString,
-          memoryUpdates: []
-        }
-        setMessages(prev => [...prev, arcusMessage])
-        removeStaged()
-      }
-    } else {
-      setStagedFile({
-        name: file.name,
-        type: file.name.split('.').pop()?.toUpperCase() || 'FILE'
-      })
-      setStagedImage(null)
-    }
-  }
-
   const removeStaged = () => {
+    preparationVersion.current++
+    setPreparingAttachment(false)
     setStagedImage(null)
     setStagedFile(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
+    setOriginalFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // Trigger biological / network simulation matching exact Stage 3/5 timing
-  const runThinkingSimulation = async (isImage: boolean): Promise<void> => {
-    const mode = isImage ? TelemetryMode.IMAGE : TelemetryMode.TEXT
-    setTelemetryStage(TelemetryStage.CLIENT_TX)
-
-    const engine = new TelemetryEngine(mode)
-    setTelemetryLog(engine.getTraceLog(120))
-
-    const steps = isImage
-      ? [
-          { stage: TelemetryStage.THINKPAD_GEMMA, dur: 850 },
-          { stage: TelemetryStage.MACBOOK_UPLOAD, dur: 2350 },
-          { stage: TelemetryStage.GEMINI_NEURAL, dur: 3820 },
-          { stage: TelemetryStage.RESPONSE_RX, dur: 4980 }
-        ]
-      : [
-          { stage: TelemetryStage.THINKPAD_GEMMA, dur: 850 },
-          { stage: TelemetryStage.RESPONSE_RX, dur: 2000 }
-        ]
-
-    for (const step of steps) {
-      await new Promise(resolve => setTimeout(resolve, 600))
-      setTelemetryStage(step.stage)
-      engine.currentStage = step.stage
-      setTelemetryLog(engine.getTraceLog(step.dur))
-    }
-  }
-
-  const applyArcusEvent = (event: ArcusStreamEvent, time: string) => {
-    setTelemetryStage(getTelemetryStageForEvent(event.type))
-    const failureMessage = event.type === 'failed'
-      ? getArcusFailureMessage(event.error_stage, event.type)
-      : null
-    setTelemetryLog(failureMessage ?? event.message)
-
-    if (event.type === 'completed') {
-      const message = formatScheduleMessage(event.result?.schedules)
-        ?? event.result?.message
-        ?? event.message
-      setMessages(prev => [...prev, {
-        id: `arcus-${Date.now()}`,
-        sender: 'arcus',
-        text: message,
-        time,
-        memoryUpdates: [],
-      }])
-    }
-
-    if (event.type === 'failed') {
-      setMessages(prev => [...prev, {
-        id: `arcus-${Date.now()}`,
-        sender: 'arcus',
-        text: failureMessage ?? event.message,
-        time,
-        memoryUpdates: [],
-      }])
-    }
-  }
-
-  // Send message through the authenticated BFF and reflect real ThinkPad events.
-  const handleSend = async () => {
-    if (!inputText.trim() && !stagedImage && !stagedFile) return
-    if (isThinking) return
-
-    const now = new Date()
-    const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    
-    const userMessage: Message = {
-      id: `user-${Date.now()}`,
-      sender: 'user',
-      text: inputText,
-      time: timeString,
-      image: stagedImage || undefined,
-      file: stagedFile ? `${stagedFile.name} (${stagedFile.type})` : undefined
-    }
-
-    setMessages(prev => [...prev, userMessage])
-    setInputText('')
-    setIsThinking(true)
-
-    const savedStagedImage = stagedImage
-
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
     removeStaged()
-    setTelemetryStage(TelemetryStage.CLIENT_TX)
-    setTelemetryLog('요청을 씽크패드로 전송하고 있습니다.')
-    let lastEventType: ArcusStreamEvent['type'] | 'client_to_bff' = 'client_to_bff'
-
+    setConversationError(null)
+    const version = preparationVersion.current
+    if (file.size > 20 * 1024 * 1024) {
+      setConversationError('첨부 파일은 20MB 이하만 저장할 수 있습니다.')
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      setOriginalFile(file)
+      setStagedFile({ name: file.name, type: file.name.split('.').pop()?.toUpperCase() || 'FILE' })
+      return
+    }
+    setPreparingAttachment(true)
     try {
-      let receivedTerminalEvent = false
+      const compressed = await compressImageFile(file)
+      if (version !== preparationVersion.current) return
+      setOriginalFile(file)
+      setStagedImage(compressed.dataUrl)
+    } catch {
+      if (version === preparationVersion.current) setConversationError('이미지를 전송 가능한 형식으로 변환하지 못했습니다.')
+    } finally {
+      if (version === preparationVersion.current) setPreparingAttachment(false)
+    }
+  }
+
+  const markFailed = (id: string, failure: string) => {
+    setMessages((previous) => previous.map((message) => message.id === id ? { ...message, failure } : message))
+  }
+
+  const applyArcusEvent = (event: ArcusStreamEvent, userMessage: Message) => {
+    setTelemetryStage(getTelemetryStageForEvent(event.type))
+    setTelemetryLog(event.message)
+    if (event.type === 'completed') {
+      setMessages((previous) => [...previous, {
+        id: event.assistant_message_id ?? crypto.randomUUID(), sender: 'arcus',
+        text: formatScheduleMessage(event.result?.schedules) ?? event.result?.message ?? event.message,
+        time: event.created_at ? displayTime(event.created_at) : currentTime(),
+      }])
+    }
+    if (event.type === 'failed') markFailed(userMessage.id, getArcusFailureMessage(event.error_stage, event.type))
+  }
+
+  const streamResponse = async (userMessage: Message, image: string | null, cid: string, attachmentIds: string[]) => {
+    let lastEventType: ArcusStreamEvent['type'] | 'client_to_bff' = 'client_to_bff'
+    let receivedTerminalEvent = false
+    try {
       const response = await fetch('/api/arcus/message/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(
-          buildArcusPayload({
-            text: userMessage.text,
-            imageDataUrl: savedStagedImage,
-          }),
-        ),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildArcusPayload({ text: userMessage.text, imageDataUrl: image,
+          messageId: userMessage.id, conversationId: cid, attachmentIds })),
       })
       await readArcusStream(response, (event) => {
         lastEventType = event.type
-        if (event.type === 'completed' || event.type === 'failed') {
-          receivedTerminalEvent = true
-        }
-        applyArcusEvent(event, timeString)
+        receivedTerminalEvent ||= event.type === 'completed' || event.type === 'failed'
+        if (currentConversation.current === cid) applyArcusEvent(event, userMessage)
       })
-      if (!receivedTerminalEvent) {
-        throw new Error('ARCUS stream ended before a terminal event')
-      }
-    } catch (err: unknown) {
-      console.error('ARCUS stream failed:', err)
-      const arcusMessage: Message = {
-        id: `arcus-${Date.now()}`,
-        sender: 'arcus',
-        text: getArcusFailureMessage(undefined, lastEventType),
-        time: timeString,
-        memoryUpdates: []
-      }
-      setMessages(prev => [...prev, arcusMessage])
+      if (!receivedTerminalEvent) throw new Error('Missing terminal event')
+    } catch {
+      if (currentConversation.current === cid) markFailed(userMessage.id, getArcusFailureMessage(undefined, lastEventType))
     } finally {
       setIsThinking(false)
+      sending.current = false
+      if (historyOpen) void history.refresh()
     }
   }
 
-  // Trigger screen capture proxy (CORS Bypass)
-  const handleCaptureScreen = async () => {
-    const now = new Date()
-    const timeString = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  const ensureConversation = async (): Promise<string> => {
+    if (currentConversation.current) return currentConversation.current
+    const conversation = await conversationRequest<Conversation>('', {})
+    currentConversation.current = conversation.id
+    return conversation.id
+  }
 
-    const userMessage: Message = {
-      id: `user-${Date.now()}`,
-      sender: 'user',
-      text: '📸 아르커스, 맥북 화면을 스캔해 주십시오.',
-      time: timeString
-    }
-
-    setMessages(prev => [...prev, userMessage])
+  const handleSend = async (suggestedText?: string) => {
+    const text = suggestedText ?? inputText
+    if ((!text.trim() && !originalFile) || sending.current || restoring || preparingAttachment) return
+    sending.current = true
     setIsThinking(true)
-
-    // Run 5-stage image telemetry
-    await runThinkingSimulation(true)
-
+    setConversationError(null)
     try {
-      // Call BFF Next.js API Route Proxy
-      const response = await fetch('/api/capture', { method: 'POST' })
-      const res = await response.json()
-
-      if (res.success) {
-        const arcusMessage: Message = {
-          id: `arcus-${Date.now()}`,
-          sender: 'arcus',
-          text: '마스터, 요청하신 맥북 화면의 실시간 캡처 스캔이 완료되었습니다. 아래 스크린샷 덤프를 전달해 드립니다.',
-          time: timeString,
-          image: res.imageUrl
-        }
-        setMessages(prev => [...prev, arcusMessage])
-      } else {
-        const arcusMessage: Message = {
-          id: `arcus-${Date.now()}`,
-          sender: 'arcus',
-          text: `죄송합니다, 마스터. 화면 캡처에 실패했습니다: ${res.error}`,
-          time: timeString
-        }
-        setMessages(prev => [...prev, arcusMessage])
-      }
-    } catch (err: unknown) {
-      const arcusMessage: Message = {
-        id: `arcus-${Date.now()}`,
-        sender: 'arcus',
-        text: `죄송합니다, 마스터. 맥북 스캔 서버 연결에 실패했습니다: ${getErrorMessage(err)}`,
-        time: timeString
-      }
-      setMessages(prev => [...prev, arcusMessage])
+      const cid = await ensureConversation()
+      const attachmentIds = originalFile ? [await uploadOriginal(originalFile)] : []
+      const userMessage: Message = { id: crypto.randomUUID(), sender: 'user', text, time: currentTime(),
+        image: stagedImage ?? undefined, file: stagedFile?.name }
+      setMessages((previous) => [...previous, userMessage])
+      setThreadTitle(text.trim() || originalFile?.name || '새 대화')
+      setActiveScreen('chat')
+      setInputText('')
+      setTelemetryStage(TelemetryStage.CLIENT_TX)
+      setTelemetryLog('요청을 씽크패드로 전송하고 있습니다.')
+      const image = stagedImage
+      removeStaged()
+      await streamResponse(userMessage, image, cid, attachmentIds)
+    } catch (error: unknown) {
+      setConversationError(error instanceof Error ? error.message : '대화를 저장하지 못했습니다.')
+      setIsThinking(false)
+      sending.current = false
     }
-    
-    setIsThinking(false)
   }
 
-  const handleCompositionStart = () => {
-    if (compositionEndTimerRef.current) {
-      clearTimeout(compositionEndTimerRef.current)
-      compositionEndTimerRef.current = null
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const composing = event.nativeEvent.isComposing || event.keyCode === 229 || isComposingRef.current
+    if (event.key === 'Enter' && !event.shiftKey && composing) {
+      event.preventDefault()
+      submitAfterCompositionRef.current = true
+      return
     }
-    isComposingRef.current = true
+    if (!shouldSubmitChatKey({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      isComposing: event.nativeEvent.isComposing,
+      keyCode: event.keyCode,
+      compositionSessionActive: isComposingRef.current,
+    })) return
+
+    event.preventDefault()
+    handleSend()
   }
 
-  const handleCompositionEnd = () => {
-    if (compositionEndTimerRef.current) {
-      clearTimeout(compositionEndTimerRef.current)
-    }
-    compositionEndTimerRef.current = setTimeout(() => {
-      isComposingRef.current = false
-      compositionEndTimerRef.current = null
-    }, 0)
+  const navigate = (screen: ScreenName) => {
+    setActiveScreen(screen)
+    setMenuOpen(false)
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (
-      shouldSubmitChatKey({
-        key: e.key,
-        shiftKey: e.shiftKey,
-        isComposing: e.nativeEvent.isComposing,
-        keyCode: e.keyCode,
-        compositionSessionActive: isComposingRef.current,
-      })
-    ) {
-      e.preventDefault()
-      void handleSend()
-    }
+  const startNewChat = async () => {
+    if (sending.current || restoring) return
+    const version = ++selectionVersion.current
+    setRestoring(true)
+    setConversationError(null)
+    try {
+      const conversation = await conversationRequest<Conversation>('', {})
+      if (version !== selectionVersion.current) return
+      currentConversation.current = conversation.id
+      setMessages(INITIAL_MESSAGES)
+      setThreadTitle('새 대화')
+      setInputText('')
+      removeStaged()
+      navigate('home')
+      if (historyOpen) void history.refresh()
+    } catch { setConversationError('새 대화를 만들지 못했습니다. 다시 시도해 주세요.') }
+    finally { if (version === selectionVersion.current) setRestoring(false) }
+  }
+
+  const selectConversation = async (conversation: Conversation) => {
+    if (sending.current) return
+    const version = ++selectionVersion.current
+    setRestoring(true)
+    setConversationError(null)
+    try {
+      const detail = await conversationRequest<ConversationDetail>(`/${conversation.id}`)
+      if (version !== selectionVersion.current) return
+      currentConversation.current = detail.id
+      setMessages(detail.messages.map(restoreMessage))
+      setThreadTitle(detail.title)
+      setInputText('')
+      removeStaged()
+      navigate('chat')
+    } catch { setConversationError('대화를 불러오지 못했습니다. 다시 선택해 주세요.') }
+    finally { if (version === selectionVersion.current) setRestoring(false) }
   }
 
   const progressValue = telemetryStage === TelemetryStage.CLIENT_TX ? 20
@@ -402,188 +279,246 @@ export default function ArcusConsole() {
         : telemetryStage === TelemetryStage.GEMINI_NEURAL ? 80
           : 100
 
+  const composer = (
+    <Composer
+      fileInputRef={fileInputRef}
+      inputText={inputText}
+      isThinking={isThinking || restoring || preparingAttachment}
+      onAttachment={() => fileInputRef.current?.click()}
+      onCompositionEnd={(text) => {
+        if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current)
+        if (submitAfterCompositionRef.current) {
+          submitAfterCompositionRef.current = false
+          isComposingRef.current = false
+          handleSend(text)
+          return
+        }
+        compositionEndTimerRef.current = setTimeout(() => {
+          isComposingRef.current = false
+          compositionEndTimerRef.current = null
+        }, 0)
+      }}
+      onCompositionStart={() => {
+        if (compositionEndTimerRef.current) clearTimeout(compositionEndTimerRef.current)
+        compositionEndTimerRef.current = null
+        isComposingRef.current = true
+      }}
+      onFileChange={handleFileChange}
+      onInput={setInputText}
+      onKeyDown={handleKeyDown}
+      onRemoveStaged={removeStaged}
+      onSend={() => handleSend()}
+      stagedFile={stagedFile}
+      stagedImage={stagedImage}
+      textareaRef={textareaRef}
+    />
+  )
+
   return (
-    <div className={styles.chatContainer}>
-      
-      {/* Premium Cyber Console Header */}
+    <div className={styles.appShell}>
       <header className={styles.header}>
-        <div className={styles.logoGroup}>
-          <div className={`${styles.pulseDot} ${
-            bridgeStatus === 'bff_pending' ? styles.pulseActive : ''
-          }`} />
-          <span className={styles.logoText}>야두트 (Yadut) // ARCUS CORE</span>
-        </div>
-        <span className={`${styles.statusBadge} ${
-          bridgeStatus === 'bff_pending' ? styles.statusActive : ''
-        }`}>
-          {bridgeStatus === 'bff_pending' ? 'BFF AUTH ACTIVE' :
-           bridgeStatus === 'checking' ? 'CHECKING AUTH...' : 'AUTH REQUIRED'}
-        </span>
+        <button aria-label="메뉴 열기" className={styles.iconButton} onClick={() => setMenuOpen(true)} type="button">
+          <span className={styles.menuIcon} aria-hidden="true" />
+        </button>
+        <span className={styles.brand}>Yadut</span>
+        <button
+          aria-label={activeScreen === 'home' ? '대화로 이동' : '홈으로 이동'}
+          className={styles.destinationButton}
+          onClick={() => setActiveScreen(activeScreen === 'home' ? 'chat' : 'home')}
+          type="button"
+        >
+          A
+        </button>
       </header>
 
-      {/* Chat Bubble Flow Container */}
-      <main className={styles.chatFlow}>
-        {messages.map((msg) => {
-          const isUser = msg.sender === 'user'
-          
-          return (
-            <div 
-              key={msg.id} 
-              className={`${styles.bubbleWrapper} ${
-                isUser ? styles.userAlign : styles.arcusAlign
-              }`}
-            >
-              <div 
-                className={`${styles.bubble} ${
-                  isUser ? styles.userBubble : styles.arcusBubble
-                }`}
-              >
-                {/* Embedded image preview inside bubble */}
-                {msg.image && (
-                  <div className={styles.bubbleImageWrapper}>
-                    <img src={msg.image} alt="Attachment" className={styles.bubbleImage} />
-                  </div>
-                )}
-
-                {/* File badge inside bubble */}
-                {msg.file && (
-                  <div className={styles.bubbleFileCard}>
-                    <span className={styles.fileIcon}>📄</span>
-                    <span className={styles.fileName}>{msg.file}</span>
-                  </div>
-                )}
-
-                {/* Dialogue Text */}
-                {msg.text && <p className={styles.bubbleText}>{msg.text}</p>}
-
-                {/* Purple Brain Memory Badge - Isolated Bottom Render */}
-                {msg.memoryUpdates && msg.memoryUpdates.length > 0 && (
-                  <div className={styles.memorySection}>
-                    <div className={styles.memoryDivider} />
-                    {msg.memoryUpdates.map((update, idx) => (
-                      <div key={idx} className={styles.memoryBadge}>
-                        <span className={styles.memoryIcon}>🧠</span>
-                        <span className={styles.memoryTitle}>기억 업데이트:</span>
-                        <span className={styles.memoryText}>{update}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <span className={styles.bubbleTime}>{msg.time}</span>
+      {conversationError && <p role="alert">{conversationError}</p>}
+      {restoring && <p role="status">대화를 불러오는 중입니다.</p>}
+      {preparingAttachment && <p role="status">첨부 이미지를 준비하고 있습니다.</p>}
+      {activeScreen === 'home' && (
+        <main className={`${styles.screen} ${styles.homeScreen}`}>
+          <div className={styles.homeContent}>
+            <p className={styles.eyebrow}>개인 비서 아르커스</p>
+            <h1 className={styles.greeting}>무엇을 함께 살펴볼까요?</h1>
+            {composer}
+            <div className={styles.suggestions}>
+              {['오늘 일정 정리해 줘', '이번 주 할 일 보여줘', '요즘 내 생활 패턴은 어때?'].map((suggestion) => (
+                <button key={suggestion} onClick={() => handleSend(suggestion)} type="button">{suggestion}</button>
+              ))}
             </div>
-          )
-        })}
-
-        {/* Current server-reported status and progress */}
-        {isThinking && (
-          <div className={styles.thinkingContainer}>
-            <div
-              className={styles.progressStatusRow}
-              role="status"
-              aria-label={telemetryLog}
-            >
-              <span className={styles.progressSpinner} aria-hidden="true" />
-              <p className={styles.progressStatus}>{telemetryLog}</p>
-            </div>
-            <div
-              className={styles.progressLineContainer}
-              role="progressbar"
-              aria-label="요청 처리 진행률"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={progressValue}
-            >
-              <div 
-                className={styles.progressLineGlow} 
-                style={{
-                  width: `${progressValue}%`,
-                  background: telemetryStage === TelemetryStage.RESPONSE_RX ? 'linear-gradient(90deg, #bd00ff, #00f3ff)' : '#00f3ff'
-                }}
-              />
-            </div>
+            <p className={styles.privacyNote}>당신의 기록을 바탕으로 필요한 맥락을 이어갑니다.</p>
           </div>
-        )}
-        
-        <div ref={chatEndRef} />
-      </main>
+        </main>
+      )}
 
-      {/* Bottom Glow Capsule Input Bar */}
-      <footer className={styles.inputCapsuleContainer}>
-        
-        {/* Floating horizontal staged attachment preview bar - Now inside footer and anchored using bottom: 100% */}
-        {(stagedImage || stagedFile) && (
-          <div className={styles.floatingStagedBar}>
-            <div className={styles.stagedDetails}>
-              {stagedImage ? (
-                <div className={styles.stagedThumbnailWrapper}>
-                  <img src={stagedImage} alt="Thumbnail" className={styles.stagedThumbnail} />
+      {activeScreen === 'chat' && (
+        <main className={`${styles.screen} ${styles.chatScreen}`}>
+          <h1 className={styles.threadTitle}>{threadTitle}</h1>
+          <div className={styles.messageFlow}>
+            {messages.map((message) => <MessageBubble key={message.id} message={message} />)}
+            {isThinking && (
+              <div className={styles.thinkingContainer}>
+                <div className={styles.progressStatusRow} role="status" aria-label={telemetryLog}>
+                  <span className={styles.progressSpinner} aria-hidden="true" />
+                  <p>{telemetryLog}</p>
                 </div>
-              ) : (
-                <span className={styles.stagedFileIcon}>📁</span>
-              )}
-              <span className={styles.stagedTitle}>
-                {stagedImage ? '이미지 파일 대기 중' : stagedFile?.name}
-              </span>
-            </div>
-            <button className={styles.removeStagedBtn} onClick={removeStaged}>✕</button>
+                <div className={styles.progressTrack} role="progressbar" aria-label="요청 처리 진행률" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressValue}>
+                  <span style={{ width: `${progressValue}%` }} />
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
           </div>
-        )}
+          {composer}
+        </main>
+      )}
 
-        {/* Hidden inputs */}
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          style={{ display: 'none' }} 
-          onChange={handleFileChange}
-          accept="image/*,application/pdf,text/plain"
-        />
+      {activeScreen === 'todos' && <TodoScreen />}
+      {activeScreen === 'memory' && <MemoryScreen />}
 
-        {/* Neon Microphone - Placed at the Leftmost. Triggers Screen Capture */}
-        <button 
-          className={styles.micBtn} 
-          onClick={handleCaptureScreen}
-          title="맥북 스크린샷 캡처 실행"
-        >
-          🎙️
-        </button>
-
-        {/* 5-Line Self Expanding Text Input */}
-        <textarea
-          ref={textareaRef}
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          onKeyDown={handleKeyDown}
-          placeholder="마스터, 지시 사항을 입력하십시오..."
-          rows={1}
-          className={styles.textField}
-        />
-
-        {/* Cyber Paperclip attachment button - Placed directly next to Send */}
-        <button 
-          className={`${styles.paperclipBtn} ${
-            (stagedImage || stagedFile) ? styles.paperclipActive : ''
-          }`}
-          onClick={handleAttachmentClick}
-        >
-          📎
-        </button>
-
-        {/* Bottom aligned Neon Send Button */}
-        <button 
-          className={`${styles.sendBtn} ${
-            (inputText.trim() || stagedImage || stagedFile) ? styles.sendActive : ''
-          }`}
-          onClick={handleSend}
-          disabled={!inputText.trim() && !stagedImage && !stagedFile}
-        >
-          ▲
-        </button>
-      </footer>
-
-
+      <YadutSidebar
+        activeScreen={activeScreen}
+        historyOpen={historyOpen}
+        onClose={() => setMenuOpen(false)}
+        onHistoryToggle={() => {
+          setHistoryOpen((open) => !open)
+          if (!historyOpen) void history.refresh()
+        }}
+        busy={isThinking || restoring || preparingAttachment}
+        conversations={history.conversations}
+        loading={history.loading}
+        error={history.error}
+        onRetry={() => void history.refresh()}
+        onNavigate={navigate}
+        onNewChat={startNewChat}
+        onSelectConversation={selectConversation}
+        open={menuOpen}
+      />
     </div>
+  )
+}
+
+type ComposerProps = {
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  inputText: string
+  isThinking: boolean
+  stagedImage: string | null
+  stagedFile: { name: string; type: string } | null
+  onInput: (text: string) => void
+  onAttachment: () => void
+  onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void
+  onCompositionStart: () => void
+  onCompositionEnd: (text: string) => void
+  onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onRemoveStaged: () => void
+  onSend: () => void
+}
+
+function Composer({
+  fileInputRef,
+  textareaRef,
+  inputText,
+  isThinking,
+  stagedImage,
+  stagedFile,
+  onInput,
+  onAttachment,
+  onFileChange,
+  onCompositionStart,
+  onCompositionEnd,
+  onKeyDown,
+  onRemoveStaged,
+  onSend,
+}: ComposerProps) {
+  return (
+    <div className={styles.composer}>
+      {(stagedImage || stagedFile) && (
+        <div className={styles.stagedBar}>
+          {stagedImage
+            ? <Image alt="첨부 이미지 미리보기" height={48} src={stagedImage} unoptimized width={48} />
+            : <span className={styles.fileCard}>문서 · {stagedFile?.name}</span>}
+          <button aria-label="첨부 삭제" onClick={onRemoveStaged} type="button">×</button>
+        </div>
+      )}
+      <input className={styles.hiddenInput} ref={fileInputRef} type="file" accept="image/*,application/pdf,text/plain" onChange={onFileChange} />
+      <button aria-label="파일 첨부" className={styles.addButton} onClick={onAttachment} type="button">＋</button>
+      <textarea
+        aria-label="대화 입력"
+        className={styles.textField}
+        onChange={(event) => onInput(event.target.value)}
+        onCompositionEnd={(event) => onCompositionEnd(event.currentTarget.value)}
+        onCompositionStart={onCompositionStart}
+        onKeyDown={onKeyDown}
+        placeholder="아르커스에게 물어보기"
+        ref={textareaRef}
+        rows={1}
+        value={inputText}
+      />
+      <button
+        aria-label="전송"
+        className={styles.sendButton}
+        disabled={isThinking || (!inputText.trim() && !stagedImage && !stagedFile)}
+        onClick={onSend}
+        type="button"
+      >
+        ↑
+      </button>
+    </div>
+  )
+}
+
+function MessageBubble({ message }: { message: Message }) {
+  return (
+    <div className={`${styles.messageRow} ${message.sender === 'user' ? styles.userMessageRow : styles.arcusMessageRow}`}>
+      <div className={styles.messageBubble}>
+        {message.image && <Image alt="첨부 이미지" className={styles.messageImage} height={240} src={message.image} unoptimized width={320} />}
+        {message.file && <div className={styles.fileCard}>{message.attachmentUrl ? <a href={message.attachmentUrl} download>{message.file}</a> : message.file}</div>}
+        {message.failure && <p role="alert">{message.failure}</p>}
+        {message.text && <p>{message.text}</p>}
+      </div>
+      {message.time && <time>{message.time}</time>}
+    </div>
+  )
+}
+
+function TodoScreen() {
+  return (
+    <main className={`${styles.screen} ${styles.featureScreen}`}>
+      <p className={styles.eyebrow}>오늘의 흐름</p>
+      <h1>투두리스트</h1>
+      <p className={styles.featureDescription}>직접 적거나 아르커스와 대화하면 필요한 일이 여기에 모입니다.</p>
+      <div className={styles.todoList}>
+        {['근무표 캘린더 확인', '이사 견적 비교하기', '저녁 30분 걷기'].map((todo, index) => (
+          <label className={styles.todoItem} key={todo}>
+            <input defaultChecked={index === 0} type="checkbox" />
+            <span>{todo}</span>
+          </label>
+        ))}
+      </div>
+      <button className={styles.primaryAction} type="button">＋ 할 일 추가</button>
+    </main>
+  )
+}
+
+function MemoryScreen() {
+  const [selected, setSelected] = useState('나')
+  const nodes = ['생활', '일정', '관계', '경제']
+  return (
+    <main className={`${styles.screen} ${styles.featureScreen}`}>
+      <p className={styles.eyebrow}>아르커스가 이해한 나</p>
+      <h1>기억 설정</h1>
+      <p className={styles.featureDescription}>정보를 눌러 연결 관계와 저장된 내용을 확인하고 수정할 수 있습니다.</p>
+      <div className={styles.memoryMap}>
+        <button className={styles.memoryCenter} onClick={() => setSelected('나')} type="button">나</button>
+        {nodes.map((node, index) => (
+          <button className={styles[`memoryNode${index + 1}` as keyof typeof styles]} key={node} onClick={() => setSelected(node)} type="button">{node}</button>
+        ))}
+      </div>
+      <section className={styles.memoryDetail}>
+        <span>선택한 기억</span>
+        <strong>{selected}</strong>
+        <p>이 영역에는 저장 근거와 연결된 정보가 표시될 예정입니다.</p>
+      </section>
+    </main>
   )
 }

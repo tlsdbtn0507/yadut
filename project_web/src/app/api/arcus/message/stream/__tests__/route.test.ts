@@ -43,7 +43,7 @@ describe('/api/arcus/message/stream', () => {
     }))
 
     expect(response.headers.get('Content-Type')).toBe('text/event-stream; charset=utf-8')
-    expect(response.headers.get('Cache-Control')).toBe('no-cache, no-transform')
+    expect(response.headers.get('Cache-Control')).toBe('no-store, no-transform')
     await expect(response.text()).resolves.toBe(upstreamBody)
     expect(fetchMock).toHaveBeenCalledWith(
       'https://thinkpad.example.com/api/arcus/message/stream',
@@ -57,6 +57,7 @@ describe('/api/arcus/message/stream', () => {
           text: '안녕',
           attachment_type: null,
           attachment_data: null,
+          attachment_mime: null,
           attachment_name: 'upload.jpg',
           message_id: 'web-1',
         }),
@@ -241,4 +242,19 @@ describe('/api/arcus/message/stream', () => {
     expect(response.status).toBe(401)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+})
+
+it('preserves stable conversation IDs and MIME, with no-store responses', async () => {
+  vi.stubEnv('THINKPAD_FUNNEL_URL', 'https://thinkpad.example.com')
+  vi.stubEnv('THINKPAD_BRIDGE_TOKEN', 'secret')
+  const fetcher = vi.fn(async () => new Response('event: completed\ndata: {"type":"completed","message":"ok"}\n\n'))
+  vi.stubGlobal('fetch', fetcher)
+  const response = await POST(new Request('http://localhost/api/arcus/message/stream', {
+    method: 'POST', body: JSON.stringify({ text: 'hi', conversation_id: 'conv', message_id: 'stable', attachment_ids: ['file'], attachment_mime: 'image/jpeg' }),
+  }))
+  expect(response.headers.get('Cache-Control')).toContain('no-store')
+  const request = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+  expect(JSON.parse(String(request[1].body))).toMatchObject({ conversation_id: 'conv', message_id: 'stable', attachment_ids: ['file'], attachment_mime: 'image/jpeg' })
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })

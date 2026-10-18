@@ -27,3 +27,14 @@ DerivedData/
 **/xcuserdata/
 *.xcuserstate
 .vercel
+
+# ThinkPad local conversation data (normally outside this repository)
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
