@@ -1,10 +1,29 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createElement, type ImgHTMLAttributes } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('next/image', () => ({
+  default: ({ unoptimized, ...props }: ImgHTMLAttributes<HTMLImageElement> & { unoptimized?: boolean }) => {
+    void unoptimized
+    return createElement('img', props)
+  },
+}))
 
 vi.mock('../../utils/conversations', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/conversations')>()
-  return { ...actual, conversationRequest: vi.fn(async () => ({ id: 'test-conversation', title: '새 대화' })) }
+  return {
+    ...actual,
+    conversationRequest: vi.fn(async () => ({ id: 'test-conversation', title: '새 대화' })),
+    uploadOriginal: vi.fn(async () => 'attachment-id'),
+  }
 })
+
+vi.mock('../../utils/imageCompression', () => ({
+  compressImageFile: vi.fn(async () => ({
+    dataUrl: 'data:image/jpeg;base64,cHJldmlldw==',
+    mimeType: 'image/jpeg',
+  })),
+}))
 
 import ArcusConsole from '../ArcusConsole'
 
@@ -212,5 +231,74 @@ describe('ArcusConsole SSE processing status', () => {
       '맥북 서버로 이미지를 전달하는 중 오류가 발생했습니다.',
     )).toBeInTheDocument()
     expect(screen.queryByText('private stream detail')).not.toBeInTheDocument()
+  })
+
+  it('sizes the app shell from the visible viewport', async () => {
+    const { container } = render(<ArcusConsole />)
+    const appShell = container.firstElementChild as HTMLElement
+
+    await waitFor(() => {
+      expect(appShell.style.getPropertyValue('--app-height')).toBe(`${window.innerHeight}px`)
+      expect(appShell.style.getPropertyValue('--app-offset-top')).toBe('0px')
+    })
+  })
+
+  it('clears the staged image and input after sending', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          'event: completed\ndata: {"type":"completed","message":"완료"}\n\n',
+        ))
+        controller.close()
+      },
+    })
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response(stream)) as typeof fetch
+    const { container } = render(<ArcusConsole />)
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+    const composer = screen.getByPlaceholderText('아르커스에게 물어보기')
+
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(['preview'], 'schedule.png', { type: 'image/png' })] },
+    })
+    expect(await screen.findByAltText('첨부 이미지 미리보기')).toBeInTheDocument()
+    fireEvent.change(composer, { target: { value: '이 일정 등록해 줘' } })
+    fireEvent.click(screen.getByRole('button', { name: '전송' }))
+
+    await waitFor(() => {
+      expect(screen.queryByAltText('첨부 이미지 미리보기')).not.toBeInTheDocument()
+      expect(screen.getByPlaceholderText('아르커스에게 물어보기')).toHaveValue('')
+    })
+  })
+
+  it('removes a staged image with the attachment delete button', async () => {
+    const { container } = render(<ArcusConsole />)
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(['preview'], 'schedule.png', { type: 'image/png' })] },
+    })
+    expect(await screen.findByAltText('첨부 이미지 미리보기')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '첨부 삭제' }))
+
+    expect(screen.queryByAltText('첨부 이미지 미리보기')).not.toBeInTheDocument()
+  })
+
+  it('keeps the latest message visible when the viewport shrinks at the bottom', async () => {
+    render(<ArcusConsole />)
+    fireEvent.click(screen.getByRole('button', { name: '대화로 이동' }))
+    const messageFlow = screen.getByRole('log', { name: '대화 내용' })
+    Object.defineProperties(messageFlow, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, value: 600, writable: true },
+    })
+    fireEvent.scroll(messageFlow)
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView)
+    scrollIntoView.mockClear()
+
+    act(() => window.dispatchEvent(new Event('resize')))
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto' }))
   })
 })

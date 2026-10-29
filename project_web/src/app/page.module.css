@@ -20,12 +20,16 @@
 .appShell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100svh;
+  height: var(--app-height, 100svh);
+  position: fixed;
+  top: var(--app-offset-top, 0px);
+  left: 50%;
+  transform: translateX(-50%);
   overflow: hidden;
 }
 
 .header {
+  flex: 0 0 auto;
   height: calc(64px + env(safe-area-inset-top, 0px));
   padding: env(safe-area-inset-top, 0px) 18px 0;
   box-sizing: border-box;
@@ -83,7 +87,8 @@
 .menuIcon::after { top: 6px; }
 
 .screen {
-  height: calc(100% - 64px - env(safe-area-inset-top, 0px));
+  flex: 1 1 auto;
+  min-height: 0;
   box-sizing: border-box;
 }
 
@@ -118,6 +123,8 @@
   padding: 8px;
   box-sizing: border-box;
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 7px;
   position: relative;
@@ -163,10 +170,12 @@
 .sendButton:disabled { background: #d9e1e9; cursor: default; }
 
 .stagedBar {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  left: 8px;
-  right: 8px;
+  position: static;
+  flex: 0 0 100%;
+  flex-basis: 100%;
+  order: -1;
+  box-sizing: border-box;
+  min-width: 0;
   min-height: 58px;
   padding: 7px 9px;
   display: flex;
@@ -203,7 +212,7 @@
 .privacyNote { margin: 20px 4px 0; color: #8995a6; font-size: 12px; }
 
 .chatScreen {
-  padding: 0 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  padding: 0 18px calc(14px + var(--app-bottom-inset, env(safe-area-inset-bottom, 0px)));
   display: flex;
   flex-direction: column;
 }
@@ -308,7 +317,7 @@
 .authButton { width: 100%; min-height: 48px; border: 0; border-radius: 14px; background: var(--blue); color: white; font: inherit; font-weight: 750; cursor: pointer; }
 
 @media (max-width: 480px) {
-  .homeScreen { align-items: end; padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+  .homeScreen { align-items: end; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .greeting { max-width: 330px; margin-bottom: 26px; }
   .suggestions { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .suggestions button { flex: 0 0 auto; }

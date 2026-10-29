@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import styles from '../app/page.module.css'
 import { buildArcusPayload } from '../utils/arcusPayload'
@@ -13,6 +13,7 @@ import { formatScheduleMessage } from '../utils/scheduleMessage'
 import { getTelemetryStageForEvent, TelemetryStage } from '../utils/telemetry'
 import YadutSidebar, { type ScreenName } from './YadutSidebar'
 import { useConversations } from '../hooks/useConversations'
+import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight'
 import { type Conversation, type ConversationDetail, type SavedMessage, conversationRequest, uploadOriginal } from '../utils/conversations'
 
 type Message = {
@@ -59,6 +60,7 @@ function currentTime(): string {
 }
 
 export default function ArcusConsole() {
+  const viewportStyle = useVisualViewportHeight()
   const history = useConversations()
   const currentConversation = useRef<string | null>(null)
   const selectionVersion = useRef(0)
@@ -80,6 +82,8 @@ export default function ArcusConsole() {
   const [telemetryStage, setTelemetryStage] = useState(TelemetryStage.CLIENT_TX)
   const [telemetryLog, setTelemetryLog] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const messageFlowRef = useRef<HTMLDivElement>(null)
+  const chatPinnedRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isComposingRef = useRef(false)
@@ -89,6 +93,10 @@ export default function ArcusConsole() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
+
+  useLayoutEffect(() => {
+    if (chatPinnedRef.current) chatEndRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [viewportStyle, stagedImage, stagedFile])
 
   useEffect(() => {
     if (!textareaRef.current) return
@@ -107,6 +115,12 @@ export default function ArcusConsole() {
     setStagedFile(null)
     setOriginalFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const trackChatPin = () => {
+    const flow = messageFlowRef.current
+    if (!flow) return
+    chatPinnedRef.current = flow.scrollHeight - flow.scrollTop - flow.clientHeight <= 48
   }
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -315,7 +329,7 @@ export default function ArcusConsole() {
   )
 
   return (
-    <div className={styles.appShell}>
+    <div className={styles.appShell} style={viewportStyle}>
       <header className={styles.header}>
         <button aria-label="메뉴 열기" className={styles.iconButton} onClick={() => setMenuOpen(true)} type="button">
           <span className={styles.menuIcon} aria-hidden="true" />
@@ -353,7 +367,14 @@ export default function ArcusConsole() {
       {activeScreen === 'chat' && (
         <main className={`${styles.screen} ${styles.chatScreen}`}>
           <h1 className={styles.threadTitle}>{threadTitle}</h1>
-          <div className={styles.messageFlow}>
+          <div
+            aria-label="대화 내용"
+            aria-live="polite"
+            className={styles.messageFlow}
+            onScroll={trackChatPin}
+            ref={messageFlowRef}
+            role="log"
+          >
             {messages.map((message) => <MessageBubble key={message.id} message={message} />)}
             {isThinking && (
               <div className={styles.thinkingContainer}>
